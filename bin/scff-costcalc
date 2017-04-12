@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+#-*- coding: utf-8 -*-
+
+import re
+from sys import argv
+
+from scff import sacf
+
+def calcTotalPrice(machine_type, nom, total_hours):
+    """ calculate price and return a fancy formatted string """
+    return "{:>11}".format("{:,.2f}€")\
+    .format(sacf.calcTotalPrice(machine_type, nom, total_hours))
+
+def print_indented(list_with_strings):
+    line = "    "
+    for k in list_with_strings:
+        if len(line) > 66:
+            print(line + ",")
+            line = "    "
+        if len(line) <= 4:
+            line = "    " + k[0]
+        else:
+            line += ", " + k[0]
+    print(line)
+
+def listMachines():
+    print("MACHINE_TYPEs:")
+    print_indented(sacf.SORTED_MACHINES)
+
+def listSpeeds():
+    print("SPEEDs:")
+    # TODO: Sorts after machine name, should sort after price
+    print_indented(sacf.SORTED_SPEEDS)
+
+def default_out(machine_type, nom=1, total_hours=0):
+    """ main ouput function """
+    if total_hours == 0:
+        if nom == 1:
+            print("One", machine_type, "instance costs:")
+        else:
+            print(nom, machine_type, "instances cost:")
+        print(calcTotalPrice(machine_type, nom, 1), "per hour")
+        print(calcTotalPrice(machine_type, nom, 24), "per day")
+        print(calcTotalPrice(machine_type, nom, 24*7), "per week")
+        print(calcTotalPrice(machine_type, nom, 24*30), "per month")
+        print(calcTotalPrice(machine_type, nom, 24*365), "per year")
+        print(calcTotalPrice(machine_type, nom, 24*365*3), "for three years")
+        print(calcTotalPrice(machine_type, nom, 24*365*0.70), \
+        "roughly per reserved instance (1year)")
+        print(calcTotalPrice(machine_type, nom, 24*365*3*0.45), \
+        "roughly per reserved instance (3years)")
+    else:
+        if nom == 1:
+            print("Costs for a", machine_type, \
+             "on-demand Linux instance running", total_hours, "hours:", \
+              calcTotalPrice(machine_type, nom, total_hours))
+        else:
+            print("Costs for", nom, machine_type, \
+             "ondemand Linux instances running", total_hours, "hours:", \
+                calcTotalPrice(machine_type, nom, total_hours))
+        if total_hours > 24*365*3*0.45 and total_hours <= 24*365*3:
+            print("However you can buy reserved instances for about", \
+                calcTotalPrice(machine_type, nom, 24*365*3*0.45), "upfront.")
+        elif total_hours > 24*365*0.7 and total_hours <= 24*365:
+            print("However you can buy reserved instances for about", \
+                calcTotalPrice(machine_type, nom, 24*365*0.70), "upfront.")
+
+
+# BEGIN
+def usage():
+    print("scff-costcalc - calculate the cost of an AWS instance over a certain time.")
+    print("Usage: " + argv[0] + " [MACHINE_TYPE|SPEED] [NUMBER_OF_MACHINES] [RUNTIME]")
+    print("Example: " + argv[0] + " m4.large 4 2weeks")
+    print()
+    listMachines()
+    listSpeeds()
+
+if len(argv) < 2 or "-h" in argv or "--help" in argv:
+    usage()
+else:
+    if argv[1] in sacf.MACHINES.keys():
+        machine_type = argv[1]
+    elif argv[1] in sacf.SPEEDS.keys():
+        machine_type = sacf.search_v(sacf.SPEEDS, argv[1])
+    else:
+        print("ERROR: Invalid machine type or speed!")
+        listMachines()
+        listSpeeds()
+        exit(1)
+    if len(argv) >= 3:
+        try:
+            nom = int(argv[2])
+        except:
+            sacf.die("Number of machines must be an integer!")
+    else:
+        nom = 1
+    if len(argv) >= 4:
+        rt = argv[3]
+        try:
+            match = re.match(r"([0-9]+)([a-z]+)", rt, re.I)
+            if match:
+                items = match.groups()
+            time_num = int(items[0])
+            time_unit = items[1][:1]
+            if not sacf.is_in(sacf.TIME_UNITS, time_unit):
+                print(time_unit, "is not in", sacf.TIME_UNITS.keys())
+            total_hours = sacf.search_v(sacf.TIME_UNITS, time_unit) * time_num
+        except Exception as e:
+            sacf.die("Invalid time input " + rt + " must be in this format INT TIMEUNIT")
+
+        default_out(machine_type, nom, total_hours)
+    else:
+        default_out(machine_type, nom)

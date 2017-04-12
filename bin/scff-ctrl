@@ -1,0 +1,934 @@
+#!/usr/bin/env python3
+
+import configparser
+import datetime
+import os
+import shutil
+import tarfile
+import threading
+from math import sin
+from subprocess import PIPE, Popen, call
+from sys import argv
+from time import sleep
+
+from scff import sacf
+
+class InstanceGroup():
+    marked_instances = []
+    def __init__(self, instance):
+        pass
+
+class cmdThread(threading.Thread):
+    total_threads = 0
+    def __init__(self, threadID, instance, cmd):
+        threading.Thread.__init__(self)
+        self.threadID = threadID
+        self.instance = instance
+        self.cmd = cmd
+        cmdThread.total_threads += 1
+
+    def run(self):
+        sacf.dprint("Start Thread: " + str(self.threadID))
+        sendCmd(self.instance, self.cmd)
+        sacf.dprint("Exiting Thread: " + str(self.threadID))
+
+def rainbow_print(msg, freq, i):
+    r = int(sin(freq*i + 0) * 127 + 127)
+    g = int(sin(freq*i + 2) * 127 + 127)
+    b = int(sin(freq*i + 4) * 127 + 127)
+    print("\033[38;2;{};{};{}m{}".format(r, g, b, msg))
+
+def cprint(msg, clear=True):
+    if cmdThread.total_threads == 1:
+        print(msg)
+    elif cmdThread.total_threads > 8:
+        rainbow_print(msg, 0.18, threading.current_thread().threadID)
+    else:
+        COLORS = ("\033[0;32m", "\033[0;33m", "\033[0;34m", "\033[0;35m",\
+                "\033[0;36m", "\033[1;34m", "\033[1;32m", "\033[1;35m")
+        try:
+            tid = threading.current_thread().threadID
+        except:
+            tid = 7
+        tcol = COLORS[tid % len(COLORS)]
+        if clear:
+            colored_str = str(tcol) + str(msg) + CLEAR
+        else:
+            colored_str = str(tcol) + str(msg)
+
+        if msg == "":
+            print(colored_str, end="")
+        else:
+            print(colored_str)
+
+def listAllCmds():
+    print("\nAvailable commands (CMD):")
+    cmds_sorted = sorted(CMDS)
+    line = "  " + cmds_sorted[0]
+    for i in range(1, len(cmds_sorted)):
+        if i + 1 < len(cmds_sorted) and len(line) > (78 - len(cmds_sorted[i+1])):
+            print(line + ",")
+            line = ""
+            line = "  " + cmds_sorted[i]
+        else:
+            line += ", " + cmds_sorted[i]
+    print(line)
+
+def listAllInstances():
+    print("\nAvailable instances:")
+    print("   EC2-INSTANCE-ID\t   GID\t\t\tNAME\t\t STATE")
+
+    for i in all_instances:
+        gid = "GID unset"
+        name = "<Unnamed>"
+        try:
+            for tag in i.tags:
+                if tag['Key'] == "GID":
+                    gid = tag['Value']
+                elif tag['Key'] == "Name":
+                    name = tag['Value']
+        except:
+            pass
+        print("{}  {}  {:.28}{}{}".format( \
+        " * " + str(i.id), \
+        gid, \
+        name, \
+        " " * (30 - min(len(name), 28)), \
+        i.state.get('Name')))
+
+def check_instance_match(instance_list, k, v):
+    instance_matches = []
+    sacf.dprint("Searching for: " + k + " " +v)
+    for i in instance_list:
+        gid = "GID unset"
+        name = "<Unnamed>"
+        role = "no role"
+        try:
+            for tag in i.tags:
+                if tag['Key'] == "GID":
+                    gid = tag['Value']
+                elif tag['Key'] == "Name":
+                    name = tag['Value']
+                elif tag['Key'] == "Role":
+                    role = tag['Value']
+        except:
+            pass
+        if k == "instance":
+            if v.startswith("!"):
+                print(v[1:])
+                if v[1:] in str(i.id):
+                    continue
+            elif v not in str(i.id):
+                continue
+        if k == "gid":
+            if v.startswith("!"):
+                if v[1:] in str(gid):
+                    continue
+            elif v not in str(gid):
+                continue
+        if k == "name":
+            if v.startswith("!"):
+                print(v[1:])
+                if v[1:] in name:
+                    continue
+            elif v not in name:
+                continue
+        if k == "state":
+            if v.startswith("!"):
+                if v[:1] in i.state.get('Name'):
+                    continue
+            elif v not in i.state.get('Name'):
+                continue
+        if k == "role":
+            if v.startswith("!"):
+                if v[1:] in role:
+                    continue
+            elif v not in role:
+                continue
+        sacf.dprint(i.id + " matches " + k +":"+ v)
+        instance_matches.append(i)
+    return instance_matches
+
+def listFilter(filterstr=None):
+    print("   EC2-INSTANCE-ID\t   GID\t\t\tNAME\t\t STATE")
+    if not filterstr:
+        return all_instances
+    filterstr = filterstr.split(",")
+    instances = all_instances
+    for word in filterstr:
+        try:
+            splitstr = word.split(":")
+            k = splitstr[0]
+            v = splitstr[1]
+        except:
+            sacf.die("Bad formatted filter string! Should be k1:v1,k2:v2 ...")
+        instances = check_instance_match(instances, k, v)
+    for i in instances:
+        name = "<Unnamed>"
+        gid = "GID UNSET"
+        try:
+            for tag in i.tags:
+                if tag['Key'] == "GID":
+                    gid = tag['Value']
+                elif tag['Key'] == "Name":
+                    name = tag['Value']
+        except:
+            pass
+        print( \
+            "{}  {}  {:.28}{}{}".format( \
+            " * " + str(i.id), \
+            gid, \
+            name, \
+            " " * (30 - min(len(name), 28)), \
+            i.state.get('Name')) \
+        )
+
+    print("Listed all instances matching " + str(filterstr) \
+         + " (" + str(len(instances)) + "/" \
+         + str(len(list(all_instances))) +")")
+    sacf.dprint(instances)
+    return instances
+
+
+def sshCmd(ip, cmd):
+    sshstr = "ssh -i " + SSH_KEY_LOC \
+        + " -o StrictHostKeyChecking=no -o ConnectTimeout=45" \
+        + " ubuntu@" + str(ip) + " " + cmd
+    sacf.dprint(sshstr)
+    if len(cmd) == 0:
+        ret = call(sshstr, shell=True)
+    else:
+        child = Popen((sshstr), shell=True, stdout=PIPE, stderr=PIPE)
+        out, err = child.communicate()
+        ret = child.returncode
+        if out:
+            cprint(out.decode("utf-8"))
+        if err:
+            cprint("(!!) " + err.decode("utf-8"))
+    if ret == 0:
+        return True
+    else:
+        return False
+
+def sshOut(ip, cmd):
+    sshstr = "ssh -i " + SSH_KEY_LOC \
+        + " -o StrictHostKeyChecking=no -o ConnectTimeout=45" \
+        + " ubuntu@" + str(ip) + " " + cmd
+    sacf.dprint(sshstr)
+    if len(cmd) == 0:
+        call(sshstr, shell=True)
+    else:
+        child = Popen((sshstr), shell=True, stdout=PIPE, stderr=PIPE)
+        out, err = child.communicate()
+        if out:
+            return out.decode("utf-8")
+        if err:
+            return err.decode("utf-8")
+    return "Failed"
+
+def scpCmd(ip, srcfile, dstfile="~", pop=False):
+    if pop:
+        scpstr = "scp -i " + SSH_KEY_LOC + " -o StrictHostKeyChecking=no" \
+        + " -r ubuntu@" + str(ip) + ":" + srcfile + " " + dstfile
+    else:
+        if not os.path.isfile(srcfile):
+            srcfile = sacf.DATA_DIR + srcfile
+        scpstr = "scp -i " + SSH_KEY_LOC + \
+        " -o StrictHostKeyChecking=no " + srcfile \
+        + " ubuntu@" + str(ip) + ":" + dstfile
+    sacf.dprint(scpstr)
+    ret = call(scpstr, shell=True)
+    if ret == 0:
+        return True
+    else:
+        return False
+
+def clean(ip):
+    sshCmd(ip, "rm -r work 2>/dev/null")
+    sshCmd(ip, "rm -r report* 2>/dev/null")
+    sshCmd(ip, "rm -r .scff/fuzzdir/* 2>/dev/null")
+    sshCmd(ip, "rm -r .scff")
+    sshCmd(ip, "mv scff-daemon.log scff-daemon.log.old 2> /dev/null")
+    if sshCmd(ip, "[ -e .scff ]"): # TODO
+        cprint("Something went wrong during cleaning!")
+    else:
+        cprint("Cleaned - don't forget to bootstrap again before fuzzing!")
+    sshCmd(ip, "mkdir .scff")
+
+
+def grabFindings(ip, findings_root_dir=None):
+    if sshCmd(ip, "[ -e .scff/distributed ]"):
+        if not findings_root_dir:
+            findings_root_dir = ".scff/fuzzdir"
+        if sshCmd(ip, "[ -e .scff/master ]"):
+            scpCmd(ip, findings_root_dir + "/crashes", "findings/crashes", True)
+            if GRAB_HANGS_TOO:
+                scpCmd(ip, findings_root_dir + "/hangs", "findings/hangs", True)
+        else:
+            cprint("Distributed client machine, reports are on the server.")
+    else:
+        if not findings_root_dir:
+            findings_root_dir = ".scff/outdir"
+        scpCmd(ip, findings_root_dir + "/crashes", "findings/crashes", True)
+        if GRAB_HANGS_TOO:
+            scpCmd(ip, findings_root_dir + "/hangs", "findings/hangs", True)
+
+def grabStats(ip, out_dir=None):
+    if out_dir:
+        scpCmd(ip, out_dir+"/fuzzer_stats", "stats/stats-"+ip, True)
+    else:
+        if sshCmd(ip, "[ -e .scff/distributed ]"):
+            sshCmd(ip, "cat work/output/\\*/fuzzer_stats")
+        else:
+            scpCmd(ip, ".scff/outdir/fuzzer_stats", "stats/stats-"+ip, True)
+
+def get_master_ip(gid):
+    for instance in InstanceGroup.marked_instances: # all_instances
+        if sacf.tag(instance, "GID") == gid:
+            if sacf.tag(instance, "Role") == "master":
+                return instance.private_ip_address
+    cprint("WARNING: Can't find master in group " + gid +  "!\n" \
+            + "Searched following instances:" + InstanceGroup.marked_instances \
+            + " maybe in: " + all_instances)
+    return None
+
+def master(ip, gid):
+    sacf.dprint("I'M " +  ip + " AND I'M YOUR MASTER NOW!")
+    sshCmd(ip, "touch .scff/distributed")
+    sshCmd(ip, "touch .scff/master")
+    sshCmd(ip, "touch .scff/" + get_master_ip(gid)) # because why not
+    if sshOut(ip, "./cmd-bearer.py is-distributed").startswith("True"):
+        cprint("Server seems to run! Stop fuzzing first!")
+    else:
+        if sshCmd(ip, "./cmd-bearer.py start") == False:
+            cprint("Something went wrong, check if server is running.")
+    sleep(2)
+    if sshOut(ip, "./cmd-bearer.py is-distributed").startswith("True"):
+        cprint("Open http://"+ip+":8000 for roving status.")
+
+def slave(ip, gid):
+    sacf.dprint("I'm " + ip + " and I'm a slave.")
+    sshCmd(ip, "touch .scff/distributed")
+    sshCmd(ip, "touch .scff/" + get_master_ip(gid))
+    sshCmd(ip, "sudo sh core-pattern")
+    if sshCmd(ip, "./cmd-bearer.py start"):
+        cprint(ip + " connecting to master ...")
+    else:
+        cprint("Failed to connect! Is " + get_master_ip(gid) + " up?")
+
+
+def bootstrap(ip):
+    if sshCmd(ip, "[ -e .scff/bootstrapped ]"):
+        cprint("Seems like instance has already been bootstrapped.")
+        cprint("If you want to bootstrap anyway, remove .scff/bootstrapped")
+        return
+    cprint("\n* Pushing scff to destination system")
+    if not scpCmd(ip, "/tmp/scff-client.tar.gz", "~"):
+        sacf.die("Failed to copy scff-client.tar.gz to destination system! " \
+            + "Make sure /tmp/scff-client.tar.gz exists and destination is " \
+            + "reachable and has write access. Then try again.", 3)
+    sshCmd(ip, "tar xf scff-client.tar.gz")
+    if sshCmd(ip, "[ -e .scff/fuzzdir/target.tar.gz ]"):
+        sshCmd(ip, "tar xf .scff/fuzzdir/target.tar.gz -C .scff/fuzzdir/")
+    sshCmd(ip, "rm scff-client.tar.gz")
+
+    cprint("\n* Installing scff dependencies, afl and setting system up for fuzzing")
+    sshCmd(ip, "sudo DEBIAN_FRONTEND=noninteractive apt-get -qq update")
+    sshCmd(ip, "sudo DEBIAN_FRONTEND=noninteractive " \
+             + "apt-get -qq install python3-pip > /dev/null")
+    sshCmd(ip, "sudo pip3 -q install psutil")
+    sshCmd(ip, "wget -nv http://lcamtuf.coredump.cx/afl/releases/afl-latest.tgz")
+    sshCmd(ip, "tar xf afl-latest.tgz")
+    sshCmd(ip, "rm afl-latest.tgz")
+    sshCmd(ip, "sudo bash install-afl")
+    sshCmd(ip, "rm install-afl")
+
+
+def deploy(ip, cfg):
+    cprint("\n* Pushing target and configurations to destination system")
+
+    if not scpCmd(ip, "/tmp/scff-data.tar.gz", "~"):
+        sacf.die("Failed to copy scff-data.tar.gz to destination system! " \
+            + "Make sure /tmp/scff-data.tar.gz exists and destination is " \
+            + "reachable and has write access. Then try again.", 3)
+
+    sshCmd(ip, "tar xf scff-data.tar.gz")
+    sshCmd(ip, "rm scff-data.tar.gz")
+
+    sshCmd(ip, "mkdir -p " + cfg['FUZZING']['inputdir'])
+    sshCmd(ip, "mkdir -p " + cfg['FUZZING']['outputdir'])
+    sshCmd(ip, "mkdir .scff 2> /dev/null")
+    sshCmd(ip, "ln -s ../" + cfg['FUZZING']['fuzzdir'] + " .scff/fuzzdir")
+    sshCmd(ip, "ln -s ../" + cfg['FUZZING']['outputdir'] +" .scff/outdir")
+    """
+    args = cfg['FUZZING']['args']
+    with open("args", "w") as f:
+        f.write(args + "\n")
+    scpCmd(ip, "args", ".scff/")
+    """
+    reqs = cfg['FUZZING']['dependencies']
+    if reqs != "none":
+        cprint("\n* Installing target dependencies")
+        sshCmd(ip, "sudo apt-get -y install " + reqs)
+    if sshCmd(ip, "[ -e post_bootstrap_cmd ]"):
+        sshCmd(ip, "chmod +x post_bootstrap_cmd")
+        sshCmd(ip, "./post_bootstrap_cmd")
+    sshCmd(ip, "bash autostart")
+
+def is_healthy(ip):
+    problem_list = []
+    if sshCmd(ip, "[ -e cmd-bearer.py ]") == False \
+        or sshCmd(ip, "[ -e pineapple.py ]") == False:
+        problem_list.append("Core scff components missing")
+    if sshOut(ip, "./cmd-bearer.py ping").startswith("pong") == False:
+        problem_list.append("scff daemon unreachable")
+    if sshCmd(ip, "[ -e .scff ]") == False:
+        problem_list.append(".scff directory does not exist")
+    if sshCmd(ip, "[ -e .scff/fuzzdir/target ]") == False:
+        problem_list.append("Target has not been deployed")
+    if sshCmd(ip, "[ -e .scff/scff.proj ]") == False:
+        problem_list.append("scff.proj does not exist")
+    if sshOut(ip, "cat /proc/sys/kernel/core_pattern") != "core\n":
+        problem_list.append("core_pattern is not 'core'")
+    if len(problem_list) > 0:
+        cprint("Problems found:")
+        for problem in problem_list:
+            cprint(" - " + problem)
+        return False
+    return True
+
+def fix_health_problems(ip, local_scff_proj_file=None):
+    core_pattern = sshOut(ip, "cat /proc/sys/kernel/core_pattern")
+    pineapple_installed = sshCmd(ip, "[ -e pineapple.py ]")
+    scff_worker_installed = sshCmd(ip, "[ -e cmd-bearer.py ]")
+    scff_cfg = sshCmd(ip, "[ -e .scff/scff.proj ]")
+    target = sshCmd(ip, "[ -e .scff/fuzzdir/target ]")
+
+    if not scff_worker_installed or not target or not pineapple_installed:
+        sshCmd(ip, "rm .scff/bootstrapped 2> /dev/null")
+        if scff_cfg:
+            if target:
+                pack_scff_data()
+                bootstrap(ip)
+            else:
+                scpCmd(ip, ".scff/scff.proj", "/tmp/scff.proj", True)
+                pack_scff_data()
+                bootstrap(ip)
+                pack_sccf_userdata(sacf.get_cfg_handle("/tmp/scff.proj"))
+                deploy(ip, sacf.get_cfg_handle("/tmp/scff.proj"))
+        else:
+            if not target:
+                if local_scff_proj_file:
+                    pack_scff_data()
+                    bootstrap(ip)
+                    pack_scff_userdata(sacf.ConfigLoader.cfg_handle)
+                    deploy(ip, sacf.ConfigLoader.cfg_handle)
+                else:
+                    cprint("scff.proj file not found on remote system! " \
+                        + "Manual bootstrap required!")
+            else:
+                pack_scff_data()
+                bootstrap(ip)
+    pineapple_running = sshOut(ip, "./cmd-bearer.py ping").startswith("pong")
+    if pineapple_installed and scff_cfg:
+        if not pineapple_running or core_pattern != "core\n":
+            sshCmd(ip, "./autostart")
+
+
+def strfdelta(tdelta, fmt):
+    d = {"days": tdelta.days}
+    d["hours"], rem = divmod(tdelta.seconds, 3600)
+    d["minutes"], d["seconds"] = divmod(rem, 60)
+    return fmt.format(**d)
+
+def sendCmd(instance, cmd):
+    """ the mega function - if cmd is valid - execute cmd on instance"""
+    successfully = True
+    ip = instance.public_ip_address
+    fuzzer_group = InstanceGroup.marked_instances
+    try:
+        cprint("Sending " +  cmd + " to " + instance.id +  " (" \
+            + sacf.tag(instance, "Name") + ")", True)
+    except:
+        cprint("Sending " +  cmd + " to " + instance.id)
+    try:
+        if cmd == "start-machine":
+            instance.start()
+        elif cmd == "halt-machine":
+            instance.stop()
+        elif cmd == "reboot-machine":
+            instance.reboot()
+        elif cmd == "remove-machine":
+            instance.terminate()
+
+        elif cmd == "info":
+            cprint("Machine state: " + instance.state.get('Name'))
+            cprint("Public IP: " + str(ip))
+            cprint("Private IP: " + str(instance.private_ip_address))
+            tagdict = instance.tags
+            line = ""
+            j = 0
+            for i in range(len(tagdict)):
+                for v in tagdict[i].values():
+                     # everything all right, order has not been changed!"
+                    if j == 0 and v != "GID":
+                        j += 1 # fix key value order
+                    j += 1
+                    if j % 2 == 0:
+                        val = (v + ", ")
+                    else:
+                        key = v
+                # strangely value comes before key so we have to reverse
+                line += key + ": " + val
+            cprint("Tags: " + line[:-2]) # remove the last ,
+            cprint("Last launch time: " + str(instance.launch_time))
+            current_time = datetime.datetime.now(instance.launch_time.tzinfo)
+            tdiff = current_time - instance.launch_time
+            if instance.state.get('Name') == "running":
+                cprint("Uptime: " + str(strfdelta \
+                (tdiff, "{days} days {hours} hours and {minutes} minutes")))
+                hours = int(strfdelta(tdiff, "{hours}"))
+                days = int(strfdelta(tdiff, "{days}"))
+                hours += 24 * days
+                cprint("Costs incurred (if instance hasn't been stopped since launch): " \
+                + str(sacf.calcTotalPrice(instance.instance_type, 1, hours)) + "€")
+
+        elif cmd == "status":
+            cprint("Machine state: " + instance.state.get('Name'))
+            if instance.state.get('Name') == "running":
+                successfully = sshCmd(ip, "./cmd-bearer.py status")
+                if sshCmd(ip, "[ -e .scff/master ]"):
+                    if sshOut(ip, "./cmd-bearer.py is-distributed").startswith("True"):
+                        cprint("open http://" + ip + ":8000 for roving status")
+                    else:
+                        cprint("Roving Server seems not to be running!")
+        else:
+
+            # from here on instances must be running - so start them
+            if instance.state.get('Name') != "running":
+                try:
+                    print("Starting instance", end="")
+                    instance.start()
+                except:
+                    print("Current state: ", instance.state)
+                while instance.state.get('Name') != "running":
+                    print(".", end="", flush=True)
+                    instance.reload()
+                    sleep(2)
+                print(".. started!")
+                ip = instance.public_ip_address
+
+            if cmd == "bootstrap":
+                bootstrap(ip)
+                deploy(ip, sacf.ConfigLoader.cfg_handle)
+
+            elif cmd == "deploy":
+                deploy(ip, sacf.ConfigLoader.cfg_handle)
+
+            elif cmd == "doctor":
+                cprint("Health status before seeing the doctor")
+                if is_healthy(ip):
+                    cprint("All Fine, no need to see the doctor :)")
+                else:
+                    if len(argv) == 4:
+                        fix_health_problems(ip, argv[4])
+                    else:
+                        fix_health_problems(ip)
+                    cprint("Health status after seeing the doctor")
+                    if is_healthy(ip):
+                        cprint("Patient has been healed :)")
+                    else:
+                        cprint("WARNING: Automatic healing failed :/")
+
+            elif cmd == "distributed":
+                gid = sacf.tag(instance, 'GID')
+                if gid != None:
+                    if sacf.tag(instance, 'Role') == "master":
+                        if is_healthy(ip):
+                            master(ip, gid)
+                    else:
+                        if is_healthy(ip):
+                            slave(ip, gid)
+                else:
+                    cprint("WARNING: GID not set, refusing to add instance to" \
+                           + " distributed node!")
+
+            elif cmd == "start-fuzzing":
+                sshCmd(ip, "sudo sh core-pattern")
+                if is_healthy(ip):
+                    successfully = sshCmd(ip, "./cmd-bearer.py start")
+            elif cmd == "resume-fuzzing":
+                successfully = sshCmd(ip, "./cmd-bearer.py resume")
+            elif cmd == "pause-fuzzing":
+                successfully = sshCmd(ip, "./cmd-bearer.py pause")
+            elif cmd == "stop-fuzzing":
+                successfully = sshCmd(ip, "./cmd-bearer.py stop")
+                sleep(1)
+                successfully = sshCmd(ip, "./cmd-bearer.py kill")
+            elif cmd == "report":
+                sshCmd(ip, "cat report-cw.txt")
+            elif cmd == "log":
+                cprint("Log of: " + ip)
+                sshCmd(ip, "cat scff-daemon.log")
+            elif cmd == "clean":
+                clean(ip)
+            elif cmd == "cmd":
+                if len(argv) < 4:
+                    print("Usage:", argv[0], argv[1], argv[2], "'REMOTE CMD'")
+                else:
+                    rstr = ""
+                    for i in range(3, len(argv)):
+                        rstr += argv[i] + " "
+                    sshCmd(ip, rstr)
+            elif cmd == "push":
+                if len(argv) < 4:
+                    print("Usage:", argv[0], argv[1], argv[2], \
+                        "'LOCAL FILE' [REMOTE FILE]")
+                elif len(argv) == 4:
+                    scpCmd(ip, argv[3])
+                else:
+                    scpCmd(ip, argv[3], argv[4])
+
+            elif cmd == "pop":
+                if len(argv) != 4:
+                    print("Usage:", argv[0], argv[1], argv[2], \
+                        "'REMOTE FILE' [LOCAL FILE]")
+                else:
+                    scpCmd(ip, argv[3], ".", True)
+
+            elif cmd == "grab-findings":
+                if len(argv) == 4:
+                    grabFindings(ip, argv[3]) # if crashes lie elsewhere..
+                else:
+                    grabFindings(ip)
+
+            elif cmd == "grab-stats":
+                if len(argv) == 4:
+                    grabStats(ip, argv[3]) # if fuzzer_stats lie elsewhere..
+                else:
+                    grabStats(ip)
+
+            elif cmd == "ssh":
+                if len(fuzzer_group) > 1:
+                    print("WARNING: More than one machine selected!" \
+                           + " Won't connect to machines via ssh!" \
+                           + " Connect manually via: \n" \
+                           + "ssh -i " + SSH_KEY_LOC + " ubuntu@"+ ip)
+                else:
+                    sshCmd(ip, "")
+
+            elif cmd == "enter-vm":
+                if sshCmd(ip, "vagrant ssh"):
+                    pass
+                elif sshCmd(ip, "vagrant rdp"):
+                    pass
+                else:
+                    sacf.die("Failed to SSH/RDP into VM! Try:\n"+\
+                    argv[0] + " " + argv[1] + " ssh\n" + \
+                    "~check Vagrantfile and port forwarding!~\n"+\
+                    "vagrant up\nvagrant ssh\nvagrant rdp.", 5)
+            elif cmd == "vm-gui":
+                sshCmd(ip, "-X virtualbox")
+
+            else:
+                print("Unknown CMD:", cmd) # should never happen
+
+    except sacf.botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "RequestLimitExceeded":
+            cprint("WARNING: AWS Request Limit Exceeded - Waiting 5 seconds ...")
+            sleep(5)
+            sendCmd(instance, cmd)
+        else:
+            cprint("-" * 78)
+            cprint("AWS Error while sending cmd to instance: " + str(instance.id))
+            cprint(e)
+            cprint("-" * 78)
+
+    if not successfully:
+        cprint("Something failed, did you run " + argv[0] + " " \
+                + argv[1] + " bootstrap PROJ_FILE")
+
+
+def deployRoving(ip):
+    print("* Installing Roving (a distributed afl fuzzer) on ", ip)
+    scpCmd(ip, "roving.tar.gz")
+    sshCmd(ip, "tar xf roving.tar.gz")
+    sshCmd(ip, "rm roving.tar.gz")
+
+def pack_scff_userdata(cfg):
+    if not cfg:
+        if len(argv) >= 4:
+            cfg = sacf.get_cfg_handle(argv[3])
+        else:
+            sacf.die("No scff project file was provided.\n" \
+            + "Use: " + argv[0] + " PROJ_FILE " + argv[2] + "\n" \
+            + "or: "  + argv[0] + " " + argv[1] + " " + argv[2] + " PROJ_FILE")
+    print("* Packing user data (target, templates, config...)")
+    targ = cfg['FUZZING']['target']
+    fuzzdir = cfg['FUZZING']['fuzzdir']
+    parent = os.path.abspath(os.path.join(targ, os.pardir))
+    if not os.path.isfile(targ):
+        sacf.die("Can't find " + targ + ", put in place and rerun!")
+
+    tar = tarfile.open("/tmp/scff-data.tar.gz", "w:gz")
+
+    if os.path.islink(targ):
+        print(targ, "is a symlink,", end="")
+        targ = os.path.realpath(targ)
+        print(" real path is:", targ)
+    if os.path.isfile(targ) and os.access(targ, os.X_OK):
+        sacf.dprint(targ + " is executable")
+        tar.add(targ, arcname=fuzzdir + "/target")
+    elif targ.endswith(".tar.gz"):
+        sacf.dprint("target seems to be a tar.gz file!")
+        targ_tar = tarfile.open(targ, "r:gz")
+        contents = targ_tar.getnames()
+        sacf.dprint(contents)
+        if "target" not in contents:
+            sacf.die(targ + " doesn't contain 'target' in root folder!")
+        tar.add(targ, arcname=fuzzdir+"/target.tar.gz")
+    elif targ.endswith(".box"):
+        tar.add(targ, arcname=fuzzdir+"/target.box")
+    else:
+        sacf.die("Target must be a executable, a .tar.gz or a .box file!" \
+        + " Check " + sacf.ConfigLoader.cfg_name, 66)
+
+    tar.add(sacf.ConfigLoader.cfg_name, arcname=".scff/scff.proj")
+    try:
+        if cfg['INSTANCES']['post_bootstrap_cmd']:
+            with open("/tmp/post_bootstrap_cmd", "w") as pbc:
+                pbc.write("#!/bin/sh\n")
+                pbc.write(cfg['INSTANCES']['post_bootstrap_cmd'])
+                pbc.write("\n")
+            tar.add("/tmp/post_bootstrap_cmd", arcname="post_bootstrap_cmd")
+    except:
+        sacf.dprint("post_bootstrap_cmd missing in project file.")
+    try:
+        if cfg['FUZZING']['template'] == "none":
+            tar.add(sacf.DATA_DIR + "testcase", \
+            arcname=cfg['FUZZING']['inputdir']+"/testcase")
+        elif os.path.isfile(cfg['FUZZING']['template']):
+            tar.add(cfg['FUZZING']['template'], \
+            arcname=cfg['FUZZING']['inputdir']+"/testcase")
+        else:
+            cprint("\nWARNING: Fuzzing template does not exist!!")
+    except Exception as e:
+        print(e)
+    tar.close()
+
+
+def pack_scff_data():
+    print("* Packing scff-client files")
+    tar = tarfile.open("/tmp/scff-client.tar.gz", "w:gz")
+    try:
+        tar.add(sacf.DATA_DIR + "fuzzers", arcname="fuzzers")
+        tar.add(sacf.DATA_DIR + "pineapple.py", arcname="pineapple.py")
+        tar.add(sacf.DATA_DIR + "cmd-bearer.py", arcname="cmd-bearer.py")
+        tar.add(sacf.DATA_DIR + "crash-watch.py", arcname="crash-watch.py")
+        tar.add(sacf.DATA_DIR + "install-afl", arcname="install-afl")
+        tar.add(sacf.DATA_DIR + "mark-redundant.patch", arcname="mark-redundant.patch")
+        tar.add(sacf.DATA_DIR + "autostart.sh", arcname="autostart")
+        tar.add(sacf.DATA_DIR + "start-server", arcname="start-server")
+        tar.add(sacf.DATA_DIR + "core-pattern", arcname="core-pattern")
+    except Exception as e:
+        print(e)
+        sacf.die("Missing files in " + sacf.DATA_DIR + "! Reinstall scff.")
+    tar.close()
+
+def autoCompleteCmd(shortform):
+    hits = 0
+    maybe_you_meant = ""
+    for cmd in CMDS:
+        if cmd.find(shortform) != -1:
+            hits += 1
+            maybe_you_meant = cmd
+    if hits == 1:
+        return maybe_you_meant
+    else:
+        return shortform
+
+def get_instances_from_config(cfg_handle):
+    return sacf.get_instances_by_tag("GID", cfg_handle["INSTANCES"]["gid"])
+
+def single(cmd, fuzzer_group):
+    # non threaded
+    if cmd == "bootstrap":
+        pack_scff_data()
+        pack_scff_userdata(sacf.ConfigLoader.cfg_handle)
+
+    if cmd == "deploy":
+        pack_scff_userdata(sacf.ConfigLoader.cfg_handle)
+
+    if cmd == "bake-image":
+        private_amis = ec2.images.filter(Owners=['self'])
+        for ami in private_amis:
+            print("ID:   ", ami.image_id)
+            print("NAME: ", ami.name)
+            print("DESC: ", ami.description)
+            print("ARCH: ", ami.architecture)
+            print("DATE: ", ami.creation_date)
+            print("DEVM: ", ami.block_device_mappings)
+            print("")
+        if len(fuzzer_group) > 1:
+            sacf.die("More than one instance selected - not creating an image!")
+        ip = fuzzer_group[0].public_ip_address
+        iid = fuzzer_group[0].id
+        pack_scff_data()
+        bootstrap(ip)
+        deployRoving(ip)
+        sshCmd(ip, "sudo apt-get -y update")
+        sshCmd(ip, "sudo apt-get -y upgrade")
+        sshCmd(ip, "sudo apt-get -y autoremove")
+        sshCmd(ip, "sudo apt-get clean")
+        sshCmd(ip, "mkdir .scff &2>/dev/null")
+        sshCmd(ip, "touch .scff/bootstrapped")
+        ans = input("Setting up basic fuzzing system: DONE. Create AMI? [Y|n] ")
+        if ans == "" or ans.lower() == "y":
+            name = input("Name: ")
+            desc = input("Description: ")
+            resp = fuzzer_group[0].create_image(iid, Name=name, Description=desc)
+            print("Created:", resp)
+        exit()
+
+    if cmd == "grab-findings":
+        if os.path.exists("findings"):
+            print("findings does already exist, renaming to findings.old.")
+            if os.path.exists("findings.old"):
+                shutil.rmtree("findings.old")
+            shutil.move("findings", "findings.old")
+        os.makedirs("findings")
+
+    if cmd == "stats":
+        if not os.path.exists("stats"):
+            try:
+                os.makedirs("stats")
+            except:
+                die("Failed to create stats directory!")
+
+def serial(cmd, fuzzer_group):
+    for inst in fuzzer_group:
+        # push roving serial instead of all at one because if too many instances
+        # are selected stalling can occur
+        if cmd == "distributed":
+            ip = inst.public_ip_address
+            if sshCmd(ip, "[ -e roving ]") == False:
+                deployRoving(ip)
+
+def parallel(cmd, fuzzer_group):
+    threads = []
+    # for each machine
+    for i in range(len(fuzzer_group)):
+        threads.append(cmdThread(i, fuzzer_group[i], cmd)) # execs cmd function
+        threads[i].start()
+        if (i+1) % 25 == 0:
+            print("Waiting 5 seconds to avoid stall")
+            sleep(5)
+
+    for thread in threads:
+        thread.join()
+
+
+def post(cmd):
+    if cmd == "bootstrap":
+        print("\nBootstrap done!\n" + \
+                "Normal fuzzing via " + argv[0]+ " "+ argv[1] + " start-fuzzing")
+        print("Distributed fuzzing via "+argv[0]+" "+ argv[1] + " distributed\n")
+
+
+# BEGIN
+
+CMDS = ("start-machine", "reboot-machine", "halt-machine", "remove-machine",
+    "info", "bake-image", "bootstrap", "doctor", "distributed",
+    "start-fuzzing", "pause-fuzzing", "resume-fuzzing", "stop-fuzzing",
+    "report", "status", "log", "cmd", "ssh", "push", "pop",
+    "clean", "grab-findings", "grab-stats", "deploy")
+
+
+def main():
+    if len(argv) <= 2:
+        print("scff-ctrl v" + VERSION + " - send commands to an AWS instance.")
+        print("Programmed by softScheck to control fuzzers in the cloud.\n")
+        print("Usage:", argv[0], "INSTANCE-ID|GID||all|running|SCFF-PROJ-FILE CMD")
+        print("      ", argv[0], "list TAG_1:VALUE_1{,TAG_N:VALUE_N} [CMD]")
+        listAllInstances()
+        listAllCmds()
+        exit(0)
+
+    fuzzer_group = []
+    if len(argv[1]) == 19: # instance ids have a length of 19
+        try:
+            for instance in all_instances:
+                if instance.id == argv[1]:
+                    fuzzer_group.append(instance)
+        except:
+            print("Can't connect to instance! Is your instance id correct?")
+            listAllInstances()
+            exit(1)
+    elif argv[1] == "all":
+        # not all, because all would include terminated
+        fuzzer_group = sacf.get_instances("avail")
+    elif argv[1] == "running":
+        fuzzer_group = sacf.get_instances("running")
+    elif argv[1] == "list":
+        if len(argv) < 3:
+            print("Usage:", argv[0], argv[1], "FIELD SEARCHSTR [CMD] [**ARGS]\n" + \
+                    "where FIELD is one of: instance, gid, name, state, role\n" + \
+                    "and SEARCHSTR is what must be matched in FIELD.\n")
+            exit()
+        elif len(argv) == 3:
+            listFilter(argv[2])
+            exit()
+        else:
+            for instance in listFilter(argv[2]):
+                if instance.state.get("Name") != "terminated":
+                    fuzzer_group.append(instance)
+    elif argv[1].endswith(".proj") or argv[1] == ".":
+        if argv[1] == ".":
+            cfg_handle = sacf.get_cfg_handle(DEF_PROJ_FILE)
+        else:
+            cfg_handle = sacf.get_cfg_handle(argv[1])
+        fuzzer_group = get_instances_from_config(cfg_handle)
+    elif len(argv[1]) == 9: # maybe its a gid?
+        fuzzer_group = sacf.get_instances_by_tag("GID", argv[1])
+    else: # malformed
+        sacf.die(argv[1] + " is neither a valid Group ID (GID) nor an instance ID!")
+
+    if len(fuzzer_group) == 0:
+        sacf.die("Either no instance selected or selected instances are terminated!", 2)
+
+    if argv[1] == "list":
+        argv.pop(2)
+
+    cmd = autoCompleteCmd(argv[2])
+    sacf.dprint(argv)
+
+    if cmd not in CMDS:
+        print("CMD must be one of the following:")
+        for valid_cmd in CMDS:
+            print(" *", valid_cmd)
+        sacf.die("You entered " + cmd + " which is not in that list.")
+
+    if not os.path.isfile(SSH_KEY_LOC):
+        sacf.die(SSH_KEY_LOC + " does not exist!\n" \
+        + "Export SSH Keys on AWS management console and place them there.")
+
+    InstanceGroup.marked_instances = fuzzer_group
+    single(cmd, fuzzer_group)
+    serial(cmd, fuzzer_group)
+    parallel(cmd, fuzzer_group)
+    post(cmd)
+
+
+# BEGIN
+
+VERSION = "0.42"
+SSH_KEY_LOC = os.path.expanduser("~")+"/.scff/aws-keys.pem"
+CLEAR = "\033[0m"
+DEF_PROJ_FILE = "scff.proj"
+GRAB_HANGS_TOO = False
+
+ec2, all_instances = sacf.ec2_and_instance_handles()
+
+if __name__ == "__main__":
+    main()
+    sacf.dprint("Main Thread Finished")

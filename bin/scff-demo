@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+
+import shlex
+import os
+from glob import glob
+from subprocess import call
+from sys import argv, stdout
+from time import sleep
+
+from scff import sacf
+
+def checkInstallation():
+    succ = True
+    if not os.path.exists(sacf.DATA_DIR +  "pineapple.py"):
+        print("ERROR: scff installation incomplete, missing files in", \
+            sacf.DATA_DIR, "please reinstall.")
+        succ = False
+    if not os.path.exists(os.path.expanduser("~")+"/.scff/aws-keys.pem"):
+        print("ERROR: SSH publickkey is missing! Please export from " \
+        + "Amazon and copy to ~/.scff/aws-keys.pem. Set permissions to 600.")
+        succ = False
+    if not os.path.exists(os.path.expanduser("~")+"/.aws/credentials"):
+        print("ERROR: ~/.aws/credentials file is missing!")
+        succ = False
+    if not succ:
+        print("Fix the errors above to continue. If you have trouble, view " \
+            + "the readme at https://github.com/softscheck/sccf/")
+        exit(1)
+
+def runCmd(explaination, cmd):
+    print("\nPress enter to", explaination)
+    print("(Executes:", cmd + ")")
+    cmd = shlex.split(cmd)
+    input()
+    return call(cmd)
+
+def runPre():
+    if runCmd("define your fuzzing project", \
+    "scff-mkcfg --cfg=demo.proj --demo -t " + sacf.DATA_DIR + "fuzz-target " \
+    + "--args=\" \" -s 'Open Port 8000'") == 0:
+        if runCmd("create instances", \
+         "scff-create-instances demo.proj") != 0:
+            print("Failed to create instances, aborting demo!")
+            exit(1)
+    else:
+        print("Something failed in mkcfg - exit")
+        exit(1)
+
+def runFuzzing():
+    runCmd("view instances/commands", "scff-ctrl")
+    print("\nWaiting for instances to boot.", end="")
+    for i in range(8):
+        sleep(1)
+        print(".", end="")
+        stdout.flush()
+    print()
+    if runCmd("bootstrap instances", \
+        "scff-ctrl demo.proj bootstrap") != 0:
+        print("Fix bootstrap errors manually, then continue")
+        input()
+
+    ans = input("Select fuzzing mode.\nS for single mode, D for distributed mode (default) [s/D]")
+    if ans.lower().startswith("s"):
+        runCmd("start single mode fuzzing", \
+            "scff-ctrl demo.proj start-fuzzing")
+        mode = "single"
+    else:
+        runCmd("start distributed fuzzing", \
+            "scff-ctrl demo.proj distributed")
+        mode = "distributed"
+    return mode
+
+def runPost(mode):
+    runCmd("view status", "scff-ctrl demo.proj status")
+    runCmd("check logs if something might went wrong", \
+     "scff-ctrl demo.proj log")
+    if mode == "distributed":
+        try: # old legacy mode ;)
+            roving_html = glob("roving*.html")[0]
+            runCmd("open fuzzer overview", "firefox " + roving_html)
+        except:
+            pass
+        runCmd("view what the fuzzers already found", \
+            "scff-ctrl demo.proj report")
+    else:
+        runCmd("view what the fuzzers already found", \
+            "scff-ctrl demo.proj report")
+    runCmd("grab reports", \
+        "scff-ctrl demo.proj grab-findings")
+    runCmd("analyze reports", "scff-exploitcheck demo.proj")
+    runCmd("shutdown machines", "scff-ctrl demo.proj halt")
+    runCmd("terminate machines (CTRL+C to exit demo and leave machines)", \
+        "scff-ctrl demo.proj remove-machine")
+
+
+def runWizard():
+    print("\nWelcome to the softScheck Cloud Fuzzer Framework Demo!")
+    runPre()
+    mode = runFuzzing()
+    runPost(mode)
+
+
+# Begin
+
+if len(argv) > 1:
+    if "-h" in argv or "--help" in argv:
+        print("Usage:", argv[0], "[skip|post|CTRL-CMD]")
+        exit(0)
+    if argv[1] == "skip":
+        mode = runFuzzing()
+        runPost(mode)
+    elif argv[1] == "post":
+        runPost("distributed")
+    else:
+        call("scff-ctrl", "running " + argv[1])
+else:
+    checkInstallation()
+    runWizard()
+

@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+#-*- coding: utf-8 -*-
+
+import configparser
+import os
+import shlex
+import signal
+from subprocess import DEVNULL, Popen
+from sys import argv
+from time import sleep
+
+try:
+    import psutil
+except ImportError:
+    print("Failed to import psutils!")
+    exit(1)
+
+cfg = configparser.ConfigParser()
+CFGFILE = os.path.expanduser("~") + "/.scff/scff.proj"
+
+if os.path.isfile(CFGFILE) == False:
+    print("ERROR: Can't load " + CFGFILE)
+    exit(2)
+try:
+    cfg.read(CFGFILE)
+    afl_input = cfg['FUZZING']['inputdir']
+    afl_output = cfg['FUZZING']['outputdir']
+    args = cfg['FUZZING']['args']
+except:
+    print("Error parsing Config!")
+
+def genreport():
+    with open("report.txt", "a") as report:
+        print(os.getcwd() + "/"+ afl_output+"/crashes")
+        print(os.listdir(os.getcwd()+"/"+afl_output+"/crashes/"))
+        report.write("*** AFL Report Start ***\n")
+        for f in os.listdir(afl_output+"/crashes"):
+            print(f)
+            if f == "README.txt":
+                continue
+            fc = open(afl_output+"/crashes/" + f, 'rb')
+            report.write("afl: " + str(fc.read()) + "\n")
+            fc.close()
+        report.write("*** AFL Report End ***\n")
+        report.close()
+
+def receive_signal(signum, stack):
+    print('Received:', signum)
+    genreport()
+
+def finish(reason=None):
+    print("Exiting...")
+    if reason:
+        print("because", reason)
+    os.kill(afl_pid, signal.SIGTERM)
+    sleep(1)
+    try:    # force cleanup
+        os.kill(afl_pid, signal.SIGKILL)
+    except:
+        pass
+    exit(0)
+
+def term_signal(signum, stack):
+    print("Received:", signum, "Stack:", stack)
+    finish()
+
+
+# BEGIN
+
+if len(argv) < 2:
+    print("Usage:", argv[0], "PARALLELIZATION_ID {TARGET}\n" + \
+          "PARALLELIZATION_ID -1 for no parallization, 0 for master, 1..n for slave\n" \
+         +"TARGET (optional) location of programm which should be fuzzed.")
+    exit(1)
+
+try:
+    par_id = int(argv[1])
+except:
+    print("ERROR: PARALLELIZATION_ID is not a valid integer!")
+    exit(3)
+
+signal.signal(signal.SIGUSR1, receive_signal)
+signal.signal(signal.SIGTERM, term_signal)
+
+""" basic checks """
+
+if not os.path.exists(afl_input):
+    os.makedirs(afl_input)
+
+if len(os.listdir(afl_input)) == 0:
+    print("WARNING: No testcase found in inputdir, creating one.", flush=True)
+    with open(afl_input+"/testcase", "w") as testcase:
+        testcase.write("abc 123")
+        testcase.close()
+if not os.path.exists(afl_output):
+    os.makedirs(afl_output)
+
+if len(os.listdir(afl_output)) != 0:
+    print("WARNING: AFL output directory not empty.", flush=True)
+
+def file_contents(filename):
+    try:
+        f = open(filename, 'rb')
+    except:
+        print ("Can't read", filename)
+        exit(4)
+    return f.read()
+
+if len(argv) == 3:
+    targ_loc = argv[2]
+else:
+    targ_loc = ".scff/fuzzdir/target"
+binary = file_contents(targ_loc)
+
+if binary.find(b"__afl_") != -1:
+    print("Binary seems to be instrumented! - YEAH :)")
+    extra_args = " "
+else:
+    if os.path.isfile(".scff/qemu_support"):
+        print("Binary is not Instrumented. --> QEMU MODE :|")
+        extra_args = " -Q "
+    else:
+        print("Binary is not Instrumented and Qemo mode NOT supported --> BLIND MODE :(")
+        extra_args = " -n "
+
+
+""" build afl launch cmd """
+
+if par_id == 0:
+    afl_cmd = "afl-fuzz -i " + afl_input + " -o " + afl_output \
+    + " -M fuzz0 " + extra_args + targ_loc + " " + args
+elif par_id > 0:
+    afl_cmd = "afl-fuzz -i " + afl_input + " -o " + afl_output \
+    + " -S fuzz" + str(par_id) + extra_args + targ_loc + " " + args
+else:
+    afl_cmd = "afl-fuzz -i " + afl_input + " -o " + afl_output \
+    + extra_args + targ_loc + " " + args
+
+cmd = shlex.split(afl_cmd)
+print(cmd)
+
+""" run afl and enter infinity loop """
+afl_pid = Popen(cmd, stdout=DEVNULL).pid
+
+print("AFL PID:", afl_pid)
+sleep(1)
+print("Inifity Loop - GO!", flush=True)
+rt = 0
+while psutil.Process(afl_pid).status() != psutil.STATUS_ZOMBIE:
+    sleep(60)
+    rt += 1
+    if (rt % 10) == 0:
+        print("AFL Status: ", (psutil.Process(afl_pid).status()), \
+            "\tRuntime: ", rt, "minutes", flush=True)
+try:
+    genreport()
+except:
+    print("Can't generate report")
+
+finish("afl crashed :(")

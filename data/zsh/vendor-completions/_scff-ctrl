@@ -1,0 +1,122 @@
+#compdef scff-ctrl
+
+_scff_ctrl_list() {
+    local -a _field
+	if (( CURRENT < 3 )); then
+    	_field=('instance\:' 'gid\:' 'name\:' 'role\:' 'state\:' 'instance\:\!' 'gid\:!' 'name\:!' 'role\:!' 'state\:!')
+    	_describe -t field 'Filter syntax -- field:search,field:search {cmd} -- ! inverts' _field 
+	fi
+	if (( CURRENT >= 3 )); then
+		if [[ ${#words[@]} == 3 ]]; then
+			CURRENT=2
+			_second_level
+		fi
+	fi
+}
+
+_scff_ctrl_bootstrap() {
+	_message "scff config file you used to create the instances"
+	_files -g "*.proj"
+}
+
+_scff_ctrl_push() {
+	if (( CURRENT == 3 )); then
+		_message "local file to push to $words[1]"
+    	_files
+	else
+		_message "destination file"
+	fi
+}
+
+_scff_ctrl_pop() {
+	if (( CURRENT == 3 )); then
+		_message "file to retrieve from $words[1]"
+	else
+		_message "destination file on local machine"
+    	_files
+	fi
+}
+
+_scff_ctrl_cmd() {
+	if (( CURRENT == 3 )); then
+		_message "command to execute on $words[1]"
+		_path_commands
+	else
+		_message "arguments for $words[3]"
+	fi
+}
+
+_second_level() {
+    local -a _cmds
+    _cmds=(
+		'bootstrap:install fuzzers and target on instance'
+        'bake-image:create a scff ready AMI based on current instance'
+		'clean:remove output and config directories of the fuzzer'
+		'cmd:execute a remote command'
+        'deploy:deploys target and configuration on the remote instance'
+        'doctor:try to fix scff problems on the instance'
+		'distributed:enable distributed fuzzing'
+		'enter-vm:connect to the vm'
+        'grab-stats:show fuzzing stats'
+		'grab-findings:copy findings to local system'
+		'halt-machine:shutdown instance'
+		'info:display instance information'
+        'log:display scff log'
+		'pause-fuzzing:pause fuzzers'
+		'resume-fuzzing:resume paused fuzzers'
+		'stop-fuzzing:stop fuzzing'
+		'report:output findings'
+		'status:display running fuzzers, cpu load and runtime'
+		'start-machine:boot instance'
+		'reboot-machine:reboot instance'
+		'remove-machine:terminate instance (all data will be lost!)'
+		'push:copy file/dir to instance'
+		'pop:retrieve file/dir from instance'
+		'ssh:open a ssh conenction to instance'
+		'start-fuzzing:start fuzzers'
+    )
+	arr=(bootstrap push pop cmd vm)
+    if (( CURRENT < 3 )); then
+        _describe "commands" _cmds
+    else
+    	local curcontext="$curcontext"
+		if [[ " ${arr[@]} " =~ " ${words[2]} " ]]; then
+			_scff_ctrl_$words[2]
+		else
+			if [[ $words[1] == list ]]; then
+				_scff_ctrl_list
+			else
+				_message "no further options required (add -d for debuging)"
+			fi
+        fi
+    fi
+}
+
+_scff_ctrl_command() {
+    local -a _scff_ctrl_first
+    _scff_ctrl_first=(
+        'all:Select all (non terminated) instances'
+        'running:Select running instances'
+        '.:Select instances from scff.proj in current directory'
+        '<INSTANCE_ID>:Selects the machine with the <INSTANCE_ID>'
+        '<GID>:Selects a group of machines matching <GID>'
+		'list:Allows to filter nicely'
+    )
+
+    if (( CURRENT == 1 )); then
+        _describe "instances" _scff_ctrl_first
+        _files -g "*.proj"
+    else
+        local curcontext="$curcontext"
+        cmd="${${_scff_ctrl_first[(r)$words[1]:*]%%:*}}"
+            if (( $+functions[_scff_ctrl_$cmd] )) && (( CURRENT == 2 )); then
+                _scff_ctrl_$cmd
+            else
+				_second_level
+            fi
+    fi
+}
+
+_arguments '*::instaces:_scff_ctrl_command'
+
+#vim: set ft=zsh sw=4 ts=4 et

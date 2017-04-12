@@ -1,0 +1,70 @@
+#have scff-ctrl &&
+_scff-ctrl_complete()
+{
+  local cur prev
+
+  COMPREPLY=()
+  cur=${COMP_WORDS[COMP_CWORD]}
+  prev=${COMP_WORDS[COMP_CWORD-1]}
+  pprev=${COMP_WORDS[COMP_CWORD-2]}
+  ppprev=${COMP_WORDS[COMP_CWORD-3]}
+
+  if [ $COMP_CWORD -eq 1 ]; then
+    COMPREPLY=( $(compgen -W "all running list *.proj" -- $cur) )
+  elif [ $COMP_CWORD -eq 2 ]; then
+    case "$prev" in
+      "list")
+        COMPREPLY=($(compgen -W "gid: name: state: role:" -- $cur))
+        ;;
+        *)
+		COMPREPLY=( $(compgen -W "bootstrap bake-image doctor deploy start-fuzzing pause-fuzzing resume-fuzzing stop-fuzzing report status start-machine halt-machine remove-machine cmd ssh push pop distributed grab-findings grab-stats info reboot-machine clean log" -- $cur) )
+		;;
+	esac
+  elif [ $COMP_CWORD -eq 3 ]; then
+    case "$prev" in
+      "bootstrap")
+		compopt -o default
+        COMPREPLY=()
+        ;;
+      "pop")
+		compopt -o default
+        COMPREPLY=()
+        ;;
+	  "push")
+		compopt -o default
+        COMPREPLY=()
+        ;;
+      *)
+		COMPREPLY=($(compgen -W "-d --debug --verbose" -- $cur))
+        ;;
+	esac
+  elif [ $COMP_CWORD -eq 4 ]; then
+   case "$pprev" in
+      "bootstrap")
+		COMPREPLY=($(compgen -W "-d --debug --verbose" -- $cur))
+        ;;
+      "pop")
+		compopt -o default
+        COMPREPLY=()
+        ;;
+	  "push")
+		compopt -o default
+        COMPREPLY=()
+        ;;
+	   *)
+		COMPREPLY=($(compgen -W "-d --debug --verbose" -- $cur))
+        ;;
+	esac
+   case "$ppprev" in
+      "list")
+		COMPREPLY=( $(compgen -W "bootstrap bake-image doctor deploy start-fuzzing pause-fuzzing resume-fuzzing stop-fuzzing report status start-machine halt-machine remove-machine cmd ssh push pop distributed grab-findings grab-stats info reboot-machine clean log" -- $cur) )
+		;;
+	   *)
+		COMPREPLY=($(compgen -W "-d --debug --verbose" -- $cur))
+        ;;
+	esac
+  fi
+
+  return 0
+} &&
+complete -F _scff-ctrl_complete scff-ctrl

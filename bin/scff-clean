@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+
+import re
+from datetime import datetime, timedelta
+from sys import argv
+
+import boto3
+
+def yes(question):
+    ans = input(question + " [Y|n]")
+    if ans.lower().startswith("y") or ans == "":
+        return True
+    return False
+
+def get_available_volumes():
+    available_volumes = ec2.volumes.filter(
+        Filters=[{'Name': 'status', 'Values': ['available']}]
+    )
+    return available_volumes
+
+def get_metrics(volume_id):
+    """Get volume idle time on an individual volume over `start_date`
+       to today"""
+    metrics = cloudwatch.get_metric_statistics(
+        Namespace='AWS/EBS',
+        MetricName='VolumeIdleTime',
+        Dimensions=[{'Name': 'VolumeId', 'Value': volume_id}],
+        Period=3600,  # every hour
+        StartTime=start_date,
+        EndTime=today,
+        Statistics=['Minimum'],
+        Unit='Seconds'
+    )
+    return metrics['Datapoints']
+
+def is_candidate(volume_id):
+    """Make sure the volume has not been used in the past 5 minutes"""
+    metrics = get_metrics(volume_id)
+    if len(metrics):
+        for metric in metrics:
+            # idle time is 5 minute interval aggregate so we use
+            # 299 seconds to test if we're lower than that
+            if metric['Minimum'] < 299:
+                return False
+    # if the volume had no metrics lower than 299 it's probably not
+    # actually being used for anything so we can include it as
+    # a candidate for deletion
+    return True
+
+
+# BEGIN
+if len(argv) > 1:
+    if "-h" in argv or "--help" in argv:
+        print("scff-clean - remove images, snapshots and volumes" \
+            + " not used within XX days.")
+        print("Usage:", argv[0], "[DAYS]\nIf DAYS is ommited, 7 days will be used.")
+        exit()
+    try:
+        DAYS = int(argv[1])
+    except:
+        print("ERROR: Argument must be an integer!")
+        exit(1)
+else:
+    DAYS = 7
+
+cloudwatch = boto3.client("cloudwatch")
+today = datetime.now() # + timedelta(days=1) # today + 1 because we want all of today
+time_range = timedelta(days=DAYS)
+start_date = today - time_range
+ec2 = boto3.resource("ec2")
+
+available_volumes = get_available_volumes()
+candidate_volumes = [
+    volume
+    for volume in available_volumes
+    if is_candidate(volume.volume_id)
+]
+# delete the unused volumes
+# WARNING -- THIS DELETES DATA
+for candidate in candidate_volumes:
+    print(candidate.id, candidate.name, candidate.description)
+    if yes("Delete volume?"):
+        print("Deleting volume...")
+        candidate.delete()
+
+instances = ec2.instances.all()
+my_images = ec2.images.filter(Owners=["self"])
+# anything that's running or stopped we want to keep the AMI
+used_images = set([instance.image_id for instance in ec2.instances.all()])
+
+images_dict = {image.id: image for image in my_images}
+unused_images_dict = {image.id: image for image in my_images if image.id not in used_images}
+
+print("Good images:", used_images)
+print("Unused images:", unused_images_dict)
+
+# now lets deregister all the unused AMIs older than *DAYS*
+for image in unused_images_dict.values():
+    created_date = datetime.strptime(
+        image.creation_date, "%Y-%m-%dT%H:%M:%S.000Z")
+    if created_date < start_date:
+        print(image.id, image.name, image.description)
+        if yes("Deregister image?"):
+            print("Deregistering image...")
+            try:
+                image.deregister()
+            except Exception as e:
+                print("ERROR:", e)
+                print("Failed to deregister image. Already derigistered?")
+
+images = ec2.images.all()
+images = [image.id for image in images]
+for snapshot in ec2.snapshots.filter(OwnerIds=["self"]):
+    r = re.match(r".*for (ami-.*) from.*", snapshot.description)
+    if r:
+        if r.groups()[0] not in images:
+            print(snapshot.id, snapshot.description)
+            if yes("Delete snapshot?"):
+                print("Deleting snapshot...")
+                snapshot.delete()
+

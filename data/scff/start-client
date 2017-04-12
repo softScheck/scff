@@ -1,0 +1,8 @@
+#!/bin/sh 
+
+cd ~/.scff
+ip=$(ls 172*)
+cd
+
+echo "~/roving/client $ip:8000 1> client.out 2> client.err" | at -t $(date --date="now +10 seconds" +"%Y%m%d%H%M.%S")
+

@@ -1,0 +1,29 @@
+--- afl-fuzz.c	2016-11-27 03:10:23.000000000 +0100
++++ afl-fuzz.c.new	2017-03-03 13:19:25.581259000 +0100
+@@ -696,7 +696,7 @@
+ 
+   fn = alloc_printf("%s/queue/.state/deterministic_done/%s", out_dir, fn + 1);
+ 
+-  fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
++  fd = open(fn, O_WRONLY | O_CREAT, 0600);
+   if (fd < 0) PFATAL("Unable to create '%s'", fn);
+   close(fd);
+ 
+@@ -719,7 +719,7 @@
+ 
+   if (symlink(ldest, fn)) {
+ 
+-    s32 fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
++    s32 fd = open(fn, O_WRONLY | O_CREAT, 0600);
+     if (fd < 0) PFATAL("Unable to create '%s'", fn);
+     close(fd);
+ 
+@@ -750,7 +750,7 @@
+ 
+   if (state) {
+ 
+-    fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
++    fd = open(fn, O_WRONLY | O_CREAT, 0600);
+     if (fd < 0) PFATAL("Unable to create '%s'", fn);
+     close(fd);
+ 

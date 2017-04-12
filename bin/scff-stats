@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+""" analyses afl stats file(s) """
+
+import os
+
+i = 0
+execs = []
+execs_per_sec = []
+crashes = []
+cycles = []
+diff = 0
+avg_diff = 0
+total_cycles = 0
+total_crashes = 0
+total_execs = 0
+avg_execs_per_sec = 0
+total_execs_per_sec = 0
+
+if not os.path.isdir("stats"):
+    print("stats directory doesn't exist!" \
+        +" Grab stats with scff-ctrl INSTANCES grab-stats.")
+    exit()
+
+for statfile in os.listdir("stats"):
+    i += 1
+    print("Reading Stat File #", i)
+    with open("stats/" + statfile, 'r') as stat:
+        contents = stat.readlines()
+        start = int(contents[0][20:])
+        end = int(contents[1][20:])
+        diff += end - start
+        print(contents[3], end="")
+        print(contents[4], end="")
+        print(contents[5])
+        total_cycles += int(contents[3][20:])
+        total_execs += int(contents[4][20:])
+        total_execs_per_sec += float(contents[5][20:])
+
+print("Fuzzing time\t  : {:,.2f} minutes".format(diff/i/60))
+print("Acc Fuzz time\t  : {:,.0f} minutes".format((diff/60)))
+print("Total Cycles\t  : {:,.0f}".format(total_cycles))
+print("Total Execs\t  : {:,.0f}".format(total_execs))
+if i > 0:
+    print("Avg Execs/s\t  : {:,.0f}".format(total_execs/(diff/i)/i))
+

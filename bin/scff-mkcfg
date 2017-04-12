@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+
+import configparser
+import os
+import argparse
+
+from scff import sacf
+
+ec2 = sacf.ec2_and_instance_handles()[0]
+
+def listAvaibleAMIs(platform):
+    if platform == "windows":
+        public_amis = ec2.images.filter(Owners=['self', 'amazon'], \
+            Filters=[{"Name":"architecture", "Values":[arch]}, \
+            {"Name":"platform", "Values":["windows"]}])
+        private_amis = ec2.images.filter(Owners=['self'], \
+            Filters=[{"Name":"architecture", "Values":[arch], \
+                    "Name":"platform", "Values":["windows"]} ])
+    else:
+        public_amis = ec2.images.filter(\
+        Filters=[{"Name":"name", "Values":["*ubuntu*16.04*"]}])
+        private_amis = ec2.images.filter(Owners=['self'], \
+            Filters=[{"Name":"architecture", "Values":[arch]} ])
+
+    amis = []
+    for ami in public_amis:
+        if ami.architecture != arch:
+            continue
+        if ami.virtualization_type != "hvm":
+            continue
+        if platform != "windows" and ami.platform == "windows":
+            continue
+        if ami.creation_date > "2016-08-27T13:37:00.00":
+            amis.append(ami)
+        if len(amis) > 15:
+            break
+
+    for ami in private_amis:
+        if platform != "windows" and ami.platform == "windows":
+            continue
+        amis.append(ami)
+
+    print("ID             NAME" + " " * 20 + "DESCRIPTION\t\t\t  ARCH")
+    for ami in amis:
+        if ami.description:
+            desc = ami.description + " " * 32
+        else:
+            desc = "<no description>" + " " * 32
+            desc = desc[:33]
+        print("{:<14}".format(ami.id), "{:<23}".format(ami.name[:21]), \
+            "{:<34}".format(desc[:32]), "{:<6}".format(ami.architecture))
+
+    return amis
+
+def selectMachine():
+    print("INSTANCE TYPE        SPEED            COST/HOUR")
+    s = sacf.SORTED_MACHINES
+    for k, v in s:
+        w = sacf.search_k(sacf.SPEEDS, k)
+        if w:
+            print("{:<20}".format(k), "{:<15}".format(w), \
+            "{:>10}".format("{:,.2f}€".format(v/100)))
+        else:
+            print("{:<20}".format(k), "{:<15}".format(""), \
+            "{:>10}".format("{:,.2f}€".format(v/100)))
+    machine = None
+    while not machine:
+        ans = input("Select instance type or machine speed [%s]: " % def_machine)
+        if ans == "":
+            ans = def_machine
+        if ans in sacf.MACHINES:
+            machine = ans
+        elif ans in sacf.SPEEDS.keys():
+            machine = sacf.search_v(sacf.SPEEDS, ans)
+    return machine
+
+def selectNumberOfMachines(nom):
+    if nom and nom > 0 and nom <= 200:
+        return nom
+    success = None
+    while not success:
+        lnom = input("Select number of machines (1-200) [%s]: " % str(def_nom))
+        if lnom == "":
+            lnom = def_nom
+        try:
+            lnom = int(lnom)
+            if lnom > 0 and lnom <= 200:
+                success = True
+        except:
+            pass
+    return lnom
+
+def isBinaryExecutable(target):
+    if os.path.isfile(target):
+        if not os.access(target, os.X_OK):
+            print("Target has no execute permission!")
+            return False
+        return True
+    print("WARNING: Can not open", target)
+    return False
+
+def set_and_check(prompt, value, default, valid="all"):
+    if force_interactive:
+        if value:
+            default = value
+            value = "unset"
+    if not value:
+        value = "unset"
+    if value != "unset" and valid == "all":
+        return value
+    while value not in valid:
+        value = input(prompt + " [" + default + "]: ")
+        if value == "":
+            value = default
+        if valid == "all":
+            return value
+    return value
+
+def listcontents(thelist):
+    items = ""
+    for item in thelist:
+        items += item + ", "
+    return items[:-2]
+
+def writeConfig(cfg):
+    cfg.add_section('INSTANCES')
+    cfg.set('INSTANCES', 'AMI', ami)
+    cfg.set('INSTANCES', 'GID', gid)
+    cfg.set('INSTANCES', 'InstanceType', mtype)
+    cfg.set('INSTANCES', 'Name', 'auto')
+    cfg.set('INSTANCES', 'NumberOfMachines', str(nom))
+    cfg.set('INSTANCES', 'Platform', platform)
+    cfg.set('INSTANCES', 'post_bootstrap_cmd', '')
+    if args.secgroup:
+        cfg.set('INSTANCES', 'secgroup', args.secgroup)
+    cfg.add_section('FUZZING')
+    cfg.set('FUZZING', 'Dependencies', reqs)
+    cfg.set('FUZZING', 'Fuzzer', fuzzer)
+    cfg.set('FUZZING', 'FuzzDir', fuzz_dir)
+    cfg.set('FUZZING', 'InputDir', input_dir)
+    cfg.set('FUZZING', 'OutputDir', output_dir)
+    cfg.set('FUZZING', 'Template', template)
+    cfg.set('FUZZING', 'Target', target)
+    cfg.set('FUZZING', 'Args', targs)
+
+    print("Writing config to", args.cfgfile.name)
+    cfg.write(args.cfgfile)
+    args.cfgfile.close()
+
+    print("\n", "=" * 20, "Configfile, check for errors", "=" * 20)
+    with open(args.cfgfile.name, 'r') as cfgfile:
+        print(cfgfile.read(),end="")
+
+
+
+# BEGIN
+
+cfg = configparser.ConfigParser()
+parser = argparse.ArgumentParser(description='Creates a scff project file.')
+
+parser.add_argument("-c", "--cfg", dest="cfgfile", default="scff.proj", \
+                    help="Projectfile will be written here", type=argparse.FileType('w+'))
+parser.add_argument("-t", "--target", dest="targfile", \
+                    help="Location of target binary", metavar="BINARY")
+parser.add_argument("-a", "--args", dest="targs", \
+                    help="Argument to pass to target")
+parser.add_argument("-n", "--nom", dest="nom", help="Number of machines", type=int)
+parser.add_argument("-i", "--inputdir", dest="inputdir", \
+                     help="Location of AFL inputdir")
+parser.add_argument("-o", "--outputdir", dest="outputdir", \
+                     help="Location of AFL outputdir")
+parser.add_argument("-d", "--fuzzdir", dest="fuzzdir", help="AFL fuzz dir")
+parser.add_argument("-g", "--gid", dest="gid", \
+                     help="Set instance group ID (must be 9 char long)")
+parser.add_argument("-m", "--mtype", dest="mtype", help="Instance type")
+parser.add_argument("--os", dest="os", help="Set instance operation system")
+parser.add_argument("--demo", action="store_true", help="Enable demo mode")
+parser.add_argument("-f", "--template", dest="template", \
+                    help="Choose a template file for the afl fuzzer")
+parser.add_argument("-s", "--secgroup", dest="secgroup", \
+                    help="Set the security group (normally not required)")
+
+args = parser.parse_args()
+
+def_target = "/bin/bash"
+def_args = ""
+def_nom = 1
+def_ostype = "linux64"
+def_machine = "slow"
+def_fuzz_dir = "fuzzing"
+def_fuzzer = "afl"
+def_template = "none"
+def_reqs = "none"
+valid_ostypes = ("win32", "win64", "linux32", "linux64")
+
+force_interactive = args.demo
+
+## set Target - TODO: Check if file actually exists
+target = set_and_check("Location of target binary/tar.gz", \
+                        args.targfile, def_target)
+
+
+## set Arguments
+targs = set_and_check("Arguments for " + os.path.basename(target) \
+                     + " (Use @@ where you normally would specify a file name)", args.targs, def_args)
+
+## set number of machines
+nom = selectNumberOfMachines(args.nom)
+
+## set instance type
+mtype = sacf.is_in(sacf.MACHINES, args.mtype)
+if not mtype:
+    mtype = selectMachine()
+
+## set arch and OS type
+ostype = set_and_check("EC2 OS must be one of " + \
+                       listcontents(valid_ostypes),\
+                       args.os, def_ostype, valid_ostypes)
+if "32" in ostype:
+    arch = "i386"
+else:
+    arch = "x86_64"
+
+if "linux" in ostype:
+    platform = "linux"
+else:
+    platform = "windows"
+    print("Warning: Windows is currently not supported!")
+    print("You can still use this tool, to create a Windows instance, though.")
+
+## set AMI
+amis = listAvaibleAMIs(platform)
+def_ami = "ami-19c995ef3"
+invalid_ami = True
+while invalid_ami:
+    newest_creation_date = "2015-04-02T13:37:00.00"
+    newest_image = "i do not exist!"
+    for img in amis:
+        if (img.platform != platform) and (img.platform != None):
+            continue
+        if img.creation_date > newest_creation_date:
+            newest_creation_date = img.creation_date
+            newest_image = img
+    def_ami = newest_image.id
+    ami = input("Select AMI-ID [%s]: " % def_ami)
+    if ami == "":
+        ami = def_ami
+    amis = ec2.images.filter(ImageIds=[ami])
+    try:
+        for img in amis:
+            valid_check = img # magically checks if image is valid
+            invalid_ami = False
+    except:
+        invalid_ami = True
+
+## set FuzzDir
+#fuzz_dir = set_and_check("Fuzzing directory", args.fuzzdir, def_fuzz_dir)
+fuzz_dir = def_fuzz_dir
+
+if args.inputdir:
+    input_dir = args.inputdir
+else:
+    input_dir = fuzz_dir + "/input"
+
+if args.outputdir:
+    output_dir = args.outputdir
+else:
+    output_dir = fuzz_dir + "/output"
+
+if output_dir == input_dir:
+    sacf.die("Input and output directory can not be the same!")
+
+## GID
+gid = ""
+def_gid = (str(nom)[:2] + ostype[:1] + "_" + os.path.basename(target))[:9]
+
+if args.gid:
+    gid = args.gid
+
+while len(gid) < 6: # dont be too harsh ;)
+    gid = input("Instance group ID (GID) (Must be 9 chars long) [%s]: " \
+               % def_gid)
+    if gid == "":
+        gid = def_gid
+
+if len(gid) < 9:
+    gid += ("_" * (9-len(gid)))
+gid = gid[:9]
+
+
+## set Fuzzer
+fuzzer = set_and_check("Fuzzer (must be one of " \
+        + str(os.listdir(sacf.DATA_DIR + "fuzzers")), None, def_fuzzer, \
+        os.listdir(sacf.DATA_DIR + "fuzzers"))
+
+if fuzzer == "afl": # other fuzzers than afl are not implemented yet
+    template = set_and_check("Template file", args.template, def_template)
+else:
+    template = "none"
+
+if ostype == "linux32" or ostype == "linux64":
+    reqs = set_and_check("Required libraries/tools for "  \
+                    + os.path.basename(target), None, def_reqs)
+else:
+    reqs = "none"
+
+writeConfig(cfg)
+

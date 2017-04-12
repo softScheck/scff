@@ -1,0 +1,3 @@
+#!/bin/sh 
+
+echo "python3 ./pineapple.py" | at -t $(date --date="now +2 seconds" +"%Y%m%d%H%M.%S")

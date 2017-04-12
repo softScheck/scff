@@ -1,0 +1,56 @@
+.TH scff 1 "softScheck Amazon Cloud Fuzzer Framework" "Version 0.42"
+
+.SH NAME
+scff -- softScheck Cloud Fuzzer Framework
+.SH DESCRIPTION
+scff enables you to easily fuzz within the Amazon cloud. scff is divided into subprogramms,
+each taking one task in the fuzzing phase. from creating a project over fuzzing to analyse the findings.
+the subprogramms are:
+.B scff-clean
+.RS
+deletes unsused volumes/snapshots/images
+.B scff-costcalc
+.RS
+shows detailed prognosed costs
+.RE
+.B scff-mkcfg
+.RS
+creates a project config which then is used by the following programms
+.RE
+.B scff-create-instances
+.RS
+creates Amazon EC2 instances
+.RE
+.B scff-ctrl
+.RS
+controls the instances aswell as the fuzzers. This is kind of the main programm
+.RE
+.B scff-stats
+.RS
+display various fuzzing statistics
+.RE
+.B scff-exploitcheck
+.RS
+check findings after exploitability
+.RE
+for options please view the man page of the subprogramm.
+
+.SH FILES
+To use this programm you need an AWS account and the following files:
+.B ~/.aws/credentials 
+.RS
+must contain AWS acces key id aswell as the secret key
+.RE
+.B ~/.aws/config 
+.RS
+must contain the region of your instances and the line output = text
+.RE
+.B ~/.scff/aws_keys.pem 
+.RS
+your ssh key
+.RE
+
+
+.SH AUTHOR
+scff was written by Wilfried Kirsch wilfried.kirsch@softscheck.com
+

@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+#-*- coding: utf-8 -*-
+
+import configparser
+import os.path
+from sys import argv
+from time import sleep
+
+from scff import sacf
+
+
+def calcTotalPrice(machine, nom, hours):
+    return "{:,.2f}€".format(sacf.calcTotalPrice(machine, nom, hours))
+
+def selectNumberOfMachines(nom):
+    """ check if number of machines is correct and give it back,
+        if not, let the user enter a correct number.
+    """
+    if nom > 0 and nom <= 200:
+        if nom > 50:
+            input("Number of machines (" + str(nom) + ") is insanely high!" + \
+            " Enter to confirm")
+        return nom
+    success = False
+    while not success:
+        lnom = input("Select number of machines (1-200): ")
+        try:
+            lnom = int(lnom)
+            if lnom > 0 and lnom <= 200:
+                success = True
+        except:
+            pass
+    return lnom
+
+def createNewInstance():
+    """create a new amazon instance and return its handle."""
+    if simulate:
+        print("Simulate flag is set, not creating machine")
+        return
+    instance = ec2.create_instances(ImageId=image,
+                                    MinCount=1, MaxCount=1,
+                                    KeyName="aws-key-pair",
+                                    SecurityGroupIds=[secgroup],
+                                    InstanceType=mtype
+                                   )
+    return instance[0]
+
+def writeTags(i, iid):
+    if cfg['INSTANCES']['name'] == "auto":
+#        name = mtype + "; fuzzing " + os.path.basename(fuzzfile)
+        name = mtype + "; fuzzing " + fuzzfile
+    else:
+        name = cfg['INSTANCES']['name'][:50]  # limit to 50 chars
+
+    if nom > 1:
+        ec2.create_tags(Resources=[iid],
+                        Tags=sacf.mktag("Name", "#" + str(i) + " " + name)
+                       )
+    else:
+        ec2.create_tags(Resources=[iid],
+                        Tags=sacf.mktag("Name", name)
+                       )
+
+    ec2.create_tags(Resources=[iid], Tags=sacf.mktag("GID", gid))
+
+    if write_vm_tag:
+        ec2.create_tags(Resources=[iid], Tags=sacf.mktag("VM", ""))
+    if i == 1:
+        ec2.create_tags(Resources=[iid], Tags=sacf.mktag("Role", "master"))
+    else:
+        ec2.create_tags(Resources=[iid], Tags=sacf.mktag("Role", "slave"))
+
+
+def printUsage():
+    print("Creates AWS instances based on a scff project file.")
+    print("If scff.proj exists in CWD, no extra arguments are required.")
+    print("Usage:", argv[0], "[PROJ_FILE] [-s | --simulate]")
+    exit(0)
+
+# BEGIN
+
+cfg = configparser.ConfigParser()
+
+if "-h" in argv or "--help" in argv or "help" in argv:
+    printUsage()
+simulate = "-s" in argv or "--simulate" in argv
+if len(argv) > 1:
+    cfgfile = argv[1]
+else:
+    cfgfile = "scff.proj"
+if os.path.isfile(cfgfile):
+    cfg.read(cfgfile)
+else:
+    if len(argv) == 1:
+        printUsage()
+    sacf.die("Can not read " + cfgfile)
+
+ec2, all_instances = sacf.ec2_and_instance_handles()
+
+try:
+    write_vm_tag = False #cfg.getboolean('INSTANCES', 'vm')
+    platform = cfg['INSTANCES']['platform']
+    mtype = cfg['INSTANCES']['instancetype']
+    fuzzfile = cfg['FUZZING']['target']
+    speed = mtype
+    nom = selectNumberOfMachines(cfg.getint('INSTANCES', 'numberofmachines'))
+except:
+    sacf.die("Config file corrupt or missing required keys!", 2)
+
+if nom == 1:
+    ans = input("\nCreating a "+ mtype + " instance running " + platform +".\n" \
+          + "(" + calcTotalPrice(mtype, nom, 1) \
+          + "/hour, " + calcTotalPrice(mtype, nom, 24)+"/day, " \
+          +  calcTotalPrice(mtype, nom, 720) + "/month)\n" \
+          + "Is this correct? [Y|n] ")
+else:
+    ans = input("\nCreating " + str(nom) + " " + mtype + " instances running " + platform +".\n" \
+          + "(" + calcTotalPrice(mtype, nom, 1) \
+          + "/hour, " + calcTotalPrice(mtype, nom, 24)+"/day, " \
+          +  calcTotalPrice(mtype, nom, 720) + "/month\n" \
+          + "Is this correct? [Y|n] ")
+
+if ans.lower() == "y" or ans.lower() == "j" or ans == "":
+    print()
+else:
+    print("User aborted")
+    exit(0)
+
+image = cfg['INSTANCES']['ami']
+
+if platform == "linux":
+    secgroup = "SSH"
+else:
+    secgroup = "RDP"
+    print("Connecting to a Windows machine using RDP has not" \
+        + " been implemented yet. Functionality will be limited!!")
+
+try:
+    secgroup = cfg['INSTANCES']['secgroup']
+except:
+    pass
+
+gid = cfg['INSTANCES']['gid']
+gid += "_" * 9 # filler if too short ;)
+gid = gid[:9] # truncate to 9 chars
+
+""" instance creation loop - currently take ~ 3 minutes for 200 machines
+    TODO: check if its faster when using multithreading
+"""
+for i in range(1, nom + 1):
+    print("Creating instance #" + str(i), end="")
+    try:
+        instance = createNewInstance()
+    except sacf.botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "RequestLimitExceed":
+            print("\nAWS Rate Limit Exceeded - Waiting 7 seconds")
+            sleep(7)
+            instance = createNewInstance()
+        else:
+            print("\nAWS/Boto ERROR")
+            print(e)
+    try:
+        writeTags(i, instance.id)
+    except sacf.botocore.exceptions.ClientError as e:
+        if e.response["Error"]["Code"] == "RequestLimitExceed":
+            print("\nAWS Rate Limit Exceeded - Waiting 7 seconds")
+            sleep(7)
+            writeTags(i, instance.id)
+        else:
+            print("\nAWS/Boto ERROR")
+            print(e)
+
+    print(" -- Instance ID:", instance.id)
+
+print("Bootstrap machines with scff-ctrl", gid, cfgfile)
+print("After this you can control all machines and fuzzers with:\n" \
+    + "scff-ctrl " + gid + "\n")
+

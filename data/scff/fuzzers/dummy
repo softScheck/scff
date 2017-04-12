@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+#-*- coding: utf-8 -*-
+
+import signal
+from time import sleep
+
+print("Hello, I'am just a useless dummy fuzzing module, from sCFF", flush=True)
+
+def usr_sig():
+    print("Dummy fuzzing module, has caught the USR1 signal.", flush=True)
+
+def term_sig():
+    print("Ouch, I got the term signal :(")
+    exit()
+
+def receive_signal(signum, stack):
+    print('Received:', signum)
+    usr_sig()
+
+def term_signal(signum, stack):
+    print("Received:", signum, "Stack:", stack)
+    term_sig()
+
+signal.signal(signal.SIGUSR1, receive_signal)
+signal.signal(signal.SIGTERM, term_signal)
+
+mins = 0
+while True:
+    sleep(120)
+    mins += 2
+    print("Dummy fuzzing module runtime: ", mins, "minutes")
+

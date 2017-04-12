@@ -1,0 +1,8 @@
+#!/bin/sh
+
+cd afl*
+mv ../mark-redundant.patch .
+yes | patch < mark-redundant.patch
+make 1> /dev/null
+make install 1> /dev/null
+

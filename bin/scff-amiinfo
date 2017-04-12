@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+
+from sys import argv
+from scff import sacf
+
+def printInfo():
+    print("ID  ", ami.id)
+    print("NAME", ami.name)
+    print("DESC", ami.description)
+    print("PLAT", ami.platform)
+    print("ARCH", ami.architecture)
+    print("VIRT", ami.virtualization_type)
+    print("DATE", ami.creation_date)
+    print()
+
+
+if len(argv) != 2:
+    ami_filter = input("AMI ID or Name: ")
+else:
+    if argv[1] == "-h" or argv[1] == "--help":
+        print("scff-amiinfo - search after AMIs and give basic infos")
+        print("Usage:", argv[0], "[AMI_ID|AMI_NAME]")
+        print("AMI_ID and AMI_NAME can include wildcards (*)")
+        exit()
+    else:
+        ami_filter = argv[1]
+
+ec2 = sacf.ec2_and_instance_handles()[0]
+
+if ami_filter.startswith("ami"):
+    try:
+        for ami in ec2.images.filter(ImageIds=[ami_filter]):
+            printInfo()
+    except:
+        print("Invalid ami ID!")
+
+else:
+    for ami in ec2.images.filter(Filters=[{"Name":"name", \
+                                "Values":["*" + ami_filter + "*"]}]):
+        printInfo()
+

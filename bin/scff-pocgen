@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+import os
+import binascii
+import configparser
+from subprocess import call
+from sys import argv
+
+MODE = "file"
+cfg = configparser.ConfigParser()
+crashdir = "crashes"
+
+def gen_poc_script(name, targ_loc, args, crashstr):
+    crashstr= str(crashstr)
+    print ("Writing", name,"...")
+    poc = open (name, 'w')
+    if MODE == "file":
+        poc.write("#!/usr/bin/env python3\n\n")
+        poc.write("from os import system\n\n")
+        poc.write("cf = open ('/tmp/CF', 'wb')\n")
+        poc.write("cf.write(" + crashstr + ")\n") 
+        poc.write("cf.close()\n") 
+        args = args.replace("@@", "/tmp/CF")
+        poc.write("system('"+targ_loc + " "+  args + "')\n")
+    else:
+        poc.write("#!/bin/sh\n\n")
+        crashstr = crashstr[2:-1].replace('"', '\\"')
+        crashstr = crashstr.replace("'", "\\'")
+        poc.write('python -c \"print(b\'' + crashstr + '\')\" | ' + targ_loc + " " \
+         + args+ "\n")
+    poc.close()
+    os.chmod(name, 0o755)
+
+
+if "-h" in argv or "help" in argv:
+    print("Usage:", argv[0], "[FUZZ-CONFIG-FILE] [CRASHDIR]")
+    exit()
+
+try:
+    conffile = argv[1]
+except:
+    conffile = "scff.proj"
+
+if not os.path.isfile(conffile):
+    print("ERROR: Can't open", conffile)
+    exit(1)
+
+try:
+    cfg.read(conffile)
+except:
+    print("ERROR:", conffile, "is not a valid scff project file!")
+    exit(2)
+
+try:
+    args = cfg['FUZZING']['args']
+    targ = cfg['FUZZING']['target']
+except:
+    print("ERROR:", conffile,"is missing required fields (target and args)")
+    exit(2)
+
+try:
+    if argv[2] != "-v" and argv[2] != "-q":
+        crashdir = argv[2]
+except:
+    pass
+
+if args.find("@@") != -1:
+    MODE = "file"
+else:
+    MODE = "stdin"
+
+if os.path.isfile(targ):
+    print("Target OK!")
+else:
+    print("Can not find", targ)
+    exit(3)
+
+targ_loc = os.path.abspath(targ)
+
+if os.path.exists(crashdir):
+    pass
+else:
+    print(crashdir, "does not exist!\n" + \
+    "Grab crashes with: scff-ctrl INSTANCES grab-findings")
+    exit(4)
+
+i = 0
+
+for finding in os.listdir(crashdir):
+    i += 1
+    with open(crashdir+"/"+finding, 'rb', 0) as findingfile: # this is
+        crashstr = (findingfile.read())
+        name = os.path.basename(targ)[:9]+ "-poc-" + str(i)
+        if MODE == "file":
+            name += ".py"
+        else:
+            name += ".sh"
+        gen_poc_script(name, targ_loc, args, crashstr)
+

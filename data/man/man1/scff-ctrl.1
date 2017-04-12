@@ -1,0 +1,160 @@
+.TH scff-ctrl 1 "softScheck Cloud Fuzzer Framework" "Version 0.42"
+
+.SH NAME
+scff-ctrl - softScheck Cloud Fuzzer Framework control program
+
+.SH DESCRIPTION
+scff-ctrl allows you to controll the EC2 instance aswell as the fuzzers running
+inside them.
+
+.SH SYNOPSIS
+
+scff-ctrl EC2-INSTANCE-ID|GID|scff_PROJ_FILE|ALL|RUNNING CMD
+
+scff-ctrl list TAG_1:VALUE_1{,TAG_N:VALUE_N} {CMD}
+
+EC2-INSTACNE-ID refers to a unique 17 charakter id every Amazon instance gets.
+GID stands for group id and allows the user to send commands to a whole group of instances
+list allows the user to filter instances by searching properties and tags of an instance.
+
+CMDs are:
+
+CMDs are explained in detail in the options section of this manual.
+
+.SH OPTIONS
+
+Following options are always applicable:
+
+.TP
+\fBstart-machine\fP
+boots the instance
+.TP
+.TP
+\fBreboot-machine\fP
+reboots the instance
+.TP
+.TP
+\fBhalt-machine\fP
+shuts the instance down
+.TP
+.TP
+\fBremove-machine\fP
+terminate the instance. the instance might show up for another hour in the instances list but ist no longer usable.
+.TP
+\fBinfo\fP
+display basic info about the instance like name, id, tags..
+.TP
+
+From here on options work only on a running instance. If the instance is shutdown the instance will automatically booted.
+
+.TP
+\fBbake-image\fP
+create a new scff ready image from a running instance
+.TP
+.TP
+\fBbootstrap \fP \fIPROJECT_DEFINITION\fP
+install fuzzers, scff daemon and set basic options on the machine to make the instance scff fuzzer ready.
+also deploys the target and project file.
+.TP
+.TP
+\fBdeploy \fP \fIPROJECT_DEFINITION\fP
+deploys the target and project file.
+.TP
+.TP
+\fBdistributed\fP
+enables and starts distributed fuzzing. On non baked images this also deploys roving (4.2MB) on every
+instance. Depending on your internet connection this could take a while.
+.TP
+.TP
+\fBstart-fuzzing\fP
+if distributed mode is enabled this starts fuzzing with the selected fuzzer in distributed mode otherwise in single mode
+.TP
+.TP
+\fBpause-fuzzing\fP
+sends SIGSTOP to all running fuzzers.
+.TP
+.TP
+\fBresume-fuzzing\fP
+sends SIGCONT to all paused fuzzers.
+.TP
+.TP
+\fBstop-fuzzing\fP
+terminate all fuzzers.
+.TP
+.TP
+\fBreport\fP
+output a fuzzing report, which include all current findings
+.TP
+.TP
+\fBstatus\fP
+display a basic status of the instance and the fuzzing process (uptime, load, memory consumption, cpu consumption, fuzzing mode, running processes affilated with the fuzzing process..)
+.TP
+.TP
+\fBlog\fP
+displays the scff daemon log - containing all error messages from programms called by the daemon (like the fuzzers).
+.TP
+.TP
+\fBcmd \fICMD\fP
+allows the execution of shell commands on the remote machine.
+.TP
+.TP
+\fBssh\fP
+open a secure shell on the remote instance.
+.TP
+.TP
+\fBpush \fILOCAL_FILE {REMOTE_FILE_NAME}\fP
+upload a file to the instance.
+.TP
+.TP
+\fBpop \fIREMOTE_FILE {LOCAL_FILE_NAME}\fP
+download a file from the instance.
+.TP
+.TP
+\fBclean\fP
+remove everything related to the current fuzzing project (target, config and log)
+Basically this lets you return to a fresh baked image and allows you to easily set up a new fuzzing
+project on the same machine without requiring you to select a different fuzzing directory.
+.TP
+.TP
+\fBgrab-findings\fP
+download all findings to your local machine for further examination.
+.TP
+.TP
+\fBgrab-stats\fP
+download fuzzer statistics (afl only) to CWD/stats. Statistics can be viewed with 
+\fIscff-stats\fP.
+This is currently the only way to view fuzzer statistics in single mode. Distributed mode statistics can
+be viewed via http://PUBLIC_IP_OF_MASTER_INSTACE:8000.
+.TP
+
+.SH EXAMPLES
+
+scff-ctrl list gid:test,role:master,state:!running info
+
+Shows all instances which contain test in their gid have the master role and are not running.
+
+
+
+.SH FILES
+To use this programm you need an AWS account and the following files:
+.B ~/.aws/credentials 
+.RS
+must contain AWS acces key id aswell as the secret key
+.RE
+.B ~/.aws/config 
+.RS
+must contain the region of your instances and the line output = text
+.RE
+.B ~/.scff/aws_keys.pem 
+.RS
+your ssh key
+.RE
+
+
+.SH BUGS
+Please send all bugs you encountered to wilfried.kirsch@softscheck.com
+
+
+.SH AUTHOR
+scff was written by Wilfried Kirsch <wilfried.kirsch@softscheck.com>
+

@@ -1,0 +1,121 @@
+.TH scff-mkcfg 1 "softScheck Cloud Fuzzer Framework" "Version 0.90"
+
+.SH NAME
+scff-mkcfg - softScheck Amazon Cloud Fuzzer Framework make config program.
+
+.SH DESCRIPTION
+scff-mkcfg allows you to easily create a scff project file, which is later used
+by programs like scff-create-instances, scff-ctrl and scff-exploitcheck.
+
+.SH SYNOPSIS
+
+scff-mkcfg [-h] [-c CFGFILE] [-t BINARY] [-a TARGS] [-n NOM]
+            [-i INPUTDIR] [-o OUTPUTDIR] [-d FUZZDIR] [-g GID]
+            [-m MTYPE] [--os OS] [--demo] [-f TEMPLATE]
+
+.SH OPTIONS
+
+TODO
+
+.SH PROJECT DEFINITION
+
+The project definition or scff config file is split in two sections.
+\fBINSTANCES\fP and \fBFUZZING\fP.
+\fBINSTANCES\fP contains the following fields:
+
+.TP
+\fBami\fP
+Amazon Machine Image which should be used to create the EC2 Instance
+.TP
+
+.TP
+\fBgid\fP
+Group ID used on all machines created using this project file. Should be 9 chars long.
+.TP
+
+
+.TP
+\fBinstancetype\fP
+The machine type used for this machine.
+.TP
+
+
+.TP
+\fBname\fP
+Contents of the name tag. If name tag is auto. \fIscff-create-instances\fP will create a name based on the target programm and the instance type 
+.TP
+
+
+.TP
+\fBNumberOfMachines\fP
+The number of instances that will be created. Must be between 1 and 200.
+.TP
+
+.TP
+\fBplattform\fP
+Can be \fIlinux\fP or something else.
+.TP
+
+.TP
+\fBvm\fP
+Writes the VM tag. This is used to send commands from \fIscff-ctrl\fP to the VM running inside the instance. NOT YET IMPLEMENTED!
+.TP
+
+
+.TP
+\fBpost_bootstrap_cmd\fP
+Shell command that will be executed after bootstrapping.
+
+
+.SH PROJECT DEFINITION EXAMPLE
+
+The following shows the contents of a valid scff project definition.
+
+[INSTANCES]
+
+ami = ami-87564feb 
+.br
+gid = qemutest2 
+.br
+instancetype = t2.micro 
+.br
+name = auto 
+.br
+numberofmachines = 4 
+.br
+platform = linux 
+.br
+vm = False 
+.br
+post_bootstrap_cmd = cd afl*/qemu_mode/ && ./build_qemu_support.sh && cd ; touch .scff/qemu_support
+
+
+
+[FUZZING]
+
+.br
+dependencies = libtool automake autoconf bison libglib2.0-dev flex
+.br
+fuzzer = afl
+.br 
+fuzzdir = fuzzing
+.br 
+inputdir = fuzzing/input
+.br 
+outputdir = fuzzing/output
+.br 
+template = tpf
+.br 
+target = not-instru.tar.gz
+.br 
+args = 
+
+
+.SH BUGS
+
+Please send all bugs you encountered to wilfried.kirsch@softscheck.com
+
+
+.SH AUTHOR
+scff-mkcfg was written by Wilfried Kirsch <wilfried.kirsch@softscheck.com>
+
