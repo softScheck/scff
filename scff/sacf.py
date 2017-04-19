@@ -24,7 +24,7 @@ def dprint(msg):
 if os.path.exists("/usr/share/scff"):
     DATA_DIR = "/usr/share/scff/"
 elif os.path.exists("/usr/local/share/scff"):
-    DATA_DIR = "/usr/share/local/share/scff/"
+    DATA_DIR = "/usr/local/share/scff/"
 elif os.path.exists(os.path.expanduser("~")+"/.local/share/scff"):
     DATA_DIR = os.path.expanduser("~")+"/.local/share/scff/"
 else:

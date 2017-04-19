@@ -574,7 +574,7 @@ def sendCmd(instance, cmd):
                 clean(ip)
             elif cmd == "cmd":
                 if len(argv) < 4:
-                    print("Usage:", argv[0], argv[1], argv[2], "'REMOTE CMD'")
+                    print("Usage:", os.path.basename(argv[0]), argv[1], argv[2], "'REMOTE CMD'")
                 else:
                     rstr = ""
                     for i in range(3, len(argv)):
@@ -661,8 +661,8 @@ def pack_scff_userdata(cfg):
             cfg = sacf.get_cfg_handle(argv[3])
         else:
             sacf.die("No scff project file was provided.\n" \
-            + "Use: " + argv[0] + " PROJ_FILE " + argv[2] + "\n" \
-            + "or: "  + argv[0] + " " + argv[1] + " " + argv[2] + " PROJ_FILE")
+            + "Use: " + os.path.basename(argv[0]) + " PROJ_FILE " + argv[2] + "\n" \
+            + "or: "  + os.path.basename(argv[0]) + " " + argv[1] + " " + argv[2] + " PROJ_FILE")
     print("* Packing user data (target, templates, config...)")
     targ = cfg['FUZZING']['target']
     fuzzdir = cfg['FUZZING']['fuzzdir']
@@ -848,8 +848,8 @@ def main():
     if len(argv) <= 2:
         print("scff-ctrl v" + VERSION + " - send commands to an AWS instance.")
         print("Programmed by softScheck to control fuzzers in the cloud.\n")
-        print("Usage:", argv[0], "INSTANCE-ID|GID||all|running|SCFF-PROJ-FILE CMD")
-        print("      ", argv[0], "list TAG_1:VALUE_1{,TAG_N:VALUE_N} [CMD]")
+        print("Usage:", os.path.basename(argv[0]), "INSTANCE-ID|GID||all|running|SCFF-PROJ-FILE CMD")
+        print("      ", os.path.basename(argv[0]), "list TAG_1:VALUE_1{,TAG_N:VALUE_N} [CMD]")
         listAllInstances()
         listAllCmds()
         exit(0)

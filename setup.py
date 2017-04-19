@@ -25,14 +25,8 @@ setup(name='scff',
 
     data_files=[('share/scff', every_file_in('data/scff')),
                 ('share/scff/fuzzers', every_file_in('data/scff/fuzzers')),
-                ('share/man/man1', every_file_in('data/man/man1')),
-                # hack
-                ('/usr/share/bash-completion/completions',
-                every_file_in('data/bash-completion/completions')),
-                ('/usr/share/zsh/vendor-completions',
-                every_file_in('data/zsh/vendor-completions'))
+                ('share/man/man1', every_file_in('data/man/man1'))
                 ],
-
 
     install_requires=['boto3'],
     scripts=every_file_in('bin'),
