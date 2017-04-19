@@ -23,8 +23,8 @@ def checkInstallation():
         print("ERROR: ~/.aws/credentials file is missing!")
         succ = False
     if not succ:
-        print("Fix the errors above to continue. If you have trouble, view " \
-            + "the readme at https://github.com/softscheck/sccf/")
+        print("\nFix the errors above to continue.\nIf you have trouble, view" \
+            + " the readme at https://github.com/softscheck/scff")
         exit(1)
 
 def runCmd(explaination, cmd):
@@ -45,8 +45,6 @@ def runPre():
     else:
         print("Something failed in mkcfg - exit")
         exit(1)
-
-def runFuzzing():
     runCmd("view instances/commands", "scff-ctrl")
     print("\nWaiting for instances to boot.", end="")
     for i in range(8):
@@ -59,6 +57,7 @@ def runFuzzing():
         print("Fix bootstrap errors manually, then continue")
         input()
 
+def runFuzz():
     ans = input("Select fuzzing mode.\nS for single mode, D for distributed mode (default) [s/D]")
     if ans.lower().startswith("s"):
         runCmd("start single mode fuzzing", \
@@ -68,23 +67,15 @@ def runFuzzing():
         runCmd("start distributed fuzzing", \
             "scff-ctrl demo.proj distributed")
         mode = "distributed"
-    return mode
-
-def runPost(mode):
     runCmd("view status", "scff-ctrl demo.proj status")
+    if mode == "distributed":
+        print("Click on the URL to view the status in your webbrowser.")
     runCmd("check logs if something might went wrong", \
      "scff-ctrl demo.proj log")
-    if mode == "distributed":
-        try: # old legacy mode ;)
-            roving_html = glob("roving*.html")[0]
-            runCmd("open fuzzer overview", "firefox " + roving_html)
-        except:
-            pass
-        runCmd("view what the fuzzers already found", \
+    runCmd("view what the fuzzers already found", \
             "scff-ctrl demo.proj report")
-    else:
-        runCmd("view what the fuzzers already found", \
-            "scff-ctrl demo.proj report")
+
+def runPost():
     runCmd("grab reports", \
         "scff-ctrl demo.proj grab-findings")
     runCmd("analyze reports", "scff-exploitcheck demo.proj")
@@ -94,25 +85,27 @@ def runPost(mode):
 
 
 def runWizard():
-    print("\nWelcome to the softScheck Cloud Fuzzer Framework Demo!")
+    print("\nWelcome to the softScheck Cloud Fuzzer Framework demo!")
     runPre()
-    mode = runFuzzing()
-    runPost(mode)
+    runFuzz()
+    runPost()
 
 
 # Begin
 
 if len(argv) > 1:
     if "-h" in argv or "--help" in argv:
-        print("Usage:", argv[0], "[skip|post|CTRL-CMD]")
+        print("scff-demo - Step by step demonstration of the sCFF workflow.")
+        print("Usage:", argv[0], "[pre-phase|fuzz-phase|post-phase|CTRL-CMD]")
         exit(0)
-    if argv[1] == "skip":
-        mode = runFuzzing()
-        runPost(mode)
-    elif argv[1] == "post":
-        runPost("distributed")
+    if argv[1] == "pre-phase":
+        runPre()
+    if argv[1] == "fuzz-phase":
+        runFuzz()
+    elif argv[1] == "post-phase":
+        runPost()
     else:
-        call("scff-ctrl", "running " + argv[1])
+        runCmd("execute a scff-ctrl command", "scff-ctrl demo.proj " + argv[1])
 else:
     checkInstallation()
     runWizard()
