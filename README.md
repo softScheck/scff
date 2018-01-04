@@ -6,10 +6,10 @@ services can easily be added. At the moment it is still a rather hard coded
 tool set to save a lot of time when fuzzing in the Amazon cloud. It helps and
 guides the user through the deployment, fuzzing itself, as well as the post fuzzing phase, in which findings must be examined.
 
-![scff-ctrl](https://www.softscheck.com/assets/img/blog/scff-ctrl.png)
+![scff-ctrl](https://www.softscheck.com/wp-content/uploads/2017/04/scff-ctrl.png)
 
 This readme just covers the basics. There is also a [Tutorial](https://www.softscheck.com/en/identifying-security-vulnerabilities-with-cloud-fuzzing) showing how to identify real life vulnerabilities with sCFF and an 
-[paper](https://www.softscheck.com/papers/Pohl_Kirsch_scff_paper_170405.pdf) which covers technical details.
+[paper](https://www.softscheck.com/publications/Pohl_Kirsch_scff_paper_170405.pdf) which covers technical details.
 
 ## Quickstart
 
@@ -36,7 +36,7 @@ In case installation will fail with a permission denied error, install as root.
 ### AWS account creation and configuration
 
 Because the only Cloud provider currently supported by sCFF is Amazon, an AWS account is required. You can create one at <https://aws.amazon.com>
-Once, finished you need to export your key_id and the corresponding aws_secrect_key aswell. It is recommended not to export the root keys, but to use and export an IAM with the minimal set of required permissions (scff requires the EC2 policies) instead.
+Once, finished you need to export your key_id and the corresponding aws_secrect_key aswell. It is recommended not to export the root keys and instead to create and export an IAM with the minimal set of required permissions (scff requires the EC2 policies).
 
 Add the keys to the file .aws/credentials like that
 ```ini
@@ -58,7 +58,7 @@ You should now be able to connect to AWS with sCFF. To check if everything is
 working without doing anything type: `scff-ctrl`
 
 While we are now able to manage EC2 instance from within our tool, we are still
-not able to connect to an EC2 instance. Todo you have to generate a SSH key pair first.
+not able to connect to an EC2 instance. Todo you have to create an SSH key pair first.
 Save the key pair as ~/.scff/aws-key-pair.pem.
 
 Next, create a Security Group with the name *SSH*. Allow TCP traffic from port 22.
@@ -97,7 +97,7 @@ Don't forget to stop or terminate the instance, once you are done, otherwise you
 * scff-pocgen: Generate proof of concept scripts
 * scff-stats: Display fuzzing statistics
 
-For more information about a single program, view its man page.
+For more information about a single program, view the associated man page.
 
 ## FAQ
 
@@ -108,10 +108,10 @@ Yes, create a new project file, stop the fuzzers and run `scff-ctrl <INSTANCE(s)
 View log with `scff-ctrl <INSTANCES(s)> log` and try `scff-crtl <INSTANCE(s)> doctor`.
 
 #### I want to use a different fuzzer.
-sCFF currently ships with an AFL module only, however you can easily add a new fuzzer module. Simply create a new python script in data/scff/fuzzers. Look at the existing afl and dummy module to get an idea how they should look.
+sCFF currently ships with an AFL module only, however you can easily create a new fuzzer module. Simply create a new python script in data/scff/fuzzers. Look at the existing afl and dummy module to get an idea how they should look.
 
 ### Do I really have to bootstrap every machine?
-No, we recommened to create a sCFF AMI. To do so, simply create a new instance and run `scff-ctrl <YOU_NEW_INSTANCE> bake-image`. This will build a sCFF ready image you can use next time for your machines. It should be at the bottom of the scff-mkcfg AMI selection. If you create a lot of AMIs, run `scff-clean` from time to time to remove unused images.
+No, we recommened to create an scff AMI. To do so, simply create a new instance and run `scff-ctrl <YOU_NEW_INSTANCE> bake-image`. This will create a sCFF ready image you can use next time for your machines. It should be at the bottom of the scff-mkcfg AMI selection. If you create a lot of AMIs, run `scff-clean` from time to time to remove unused images.
 
 #### I don't like the Amazon cloud, what about Google Cloud, Azure, etc?
 Currently not supported and it's unlikely that it will be in the next months. Sorry :(
