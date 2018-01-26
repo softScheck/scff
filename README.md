@@ -6,10 +6,10 @@ services can easily be added. At the moment it is still a rather hard coded
 tool set to save a lot of time when fuzzing in the Amazon cloud. It helps and
 guides the user through the deployment, fuzzing itself, as well as the post fuzzing phase, in which findings must be examined.
 
-![scff-ctrl](https://www.softscheck.com/wp-content/uploads/2017/04/scff-ctrl.png)
+![scff-ctrl](https://www.softscheck.com/assets/img/blog/scff-ctrl.png)
 
 This readme just covers the basics. There is also a [Tutorial](https://www.softscheck.com/en/identifying-security-vulnerabilities-with-cloud-fuzzing) showing how to identify real life vulnerabilities with sCFF and an 
-[paper](https://www.softscheck.com/publications/Pohl_Kirsch_scff_paper_170405.pdf) which covers technical details.
+[paper](https://www.softscheck.com/papers/Pohl_Kirsch_scff_paper_170405.pdf) which covers technical details.
 
 ## Quickstart
 
