@@ -19,7 +19,7 @@ This chapter covers the installation, AWS setup, first run and scff-demo to demo
 
 Get sCFF from the GitHub repository:
 ```bash
-git clone https://github/softscheck/scff.git
+git clone https://github.com/softscheck/scff.git
 cd scff
 ```
 
